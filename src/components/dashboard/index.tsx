@@ -7,8 +7,7 @@ import { DashboardNav, type DashboardTab } from "@/components/dashboard/dashboar
 import { Overview } from "@/components/dashboard/overview";
 import { AccountsPanel } from "@/components/accounts-panel";
 import { CSVImportModal } from "@/components/csv-import-modal";
-
-type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
+import type { MarketColumnId } from "@/components/holdings-table";
 
 export function Dashboard() {
   const {
@@ -20,6 +19,7 @@ export function Dashboard() {
     loadingAccounts,
     refreshing,
     refreshData,
+    error,
   } = useDashboardData();
 
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -27,16 +27,32 @@ export function Dashboard() {
   const [refreshingColumns, setRefreshingColumns] = useState<Set<MarketColumnId>>(new Set());
   const [refreshingUrls, setRefreshingUrls] = useState(false);
   const [refreshingAllMarketData, setRefreshingAllMarketData] = useState(false);
+  const [marketDataError, setMarketDataError] = useState<string | null>(null);
 
-  // Logic for partial refresh (copied from original dashboard but simplified)
+  async function refreshMarketData(url: string, fallbackErrorMessage: string): Promise<void> {
+    setMarketDataError(null);
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(
+        typeof body?.error === "string" && body.error.length > 0
+          ? body.error
+          : fallbackErrorMessage
+      );
+    }
+    await refreshData();
+  }
+
   const forceRefreshColumn = async (columnId: MarketColumnId) => {
     if (refreshingColumns.has(columnId) || refreshingUrls || refreshingAllMarketData) return;
     setRefreshingColumns(prev => new Set(prev).add(columnId));
     try {
-      await fetch("/api/holdings?aggregate=true&marketData=live&forceRefresh=true");
-      await refreshData();
+      await refreshMarketData(
+        "/api/holdings?aggregate=true&marketData=live&forceRefresh=true",
+        `${columnId}の更新に失敗しました`
+      );
     } catch (error) {
-       console.error(`Failed to refresh column ${columnId}:`, error);
+      setMarketDataError(error instanceof Error ? error.message : `${columnId}の更新に失敗しました`);
     } finally {
       setRefreshingColumns(prev => {
         const next = new Set(prev);
@@ -50,10 +66,12 @@ export function Dashboard() {
      if (refreshingAllMarketData || refreshingUrls || refreshingColumns.size > 0) return;
      setRefreshingAllMarketData(true);
      try {
-       await fetch("/api/holdings?aggregate=true&marketData=live&forceRefresh=true");
-       await refreshData();
+       await refreshMarketData(
+         "/api/holdings?aggregate=true&marketData=live&forceRefresh=true",
+         "市場データの全更新に失敗しました"
+       );
      } catch (error) {
-       console.error("Failed to refresh all market data:", error);
+       setMarketDataError(error instanceof Error ? error.message : "市場データの全更新に失敗しました");
      } finally {
        setRefreshingAllMarketData(false);
      }
@@ -63,12 +81,12 @@ export function Dashboard() {
     if (refreshingUrls || refreshingAllMarketData || refreshingColumns.size > 0) return;
     setRefreshingUrls(true);
     try {
-      await fetch(
-        "/api/holdings?aggregate=true&marketData=live&forceRefresh=true&forceResolveSymbol=true"
+      await refreshMarketData(
+        "/api/holdings?aggregate=true&marketData=live&forceRefresh=true&forceResolveSymbol=true",
+        "Yahooシンボルの再解決に失敗しました"
       );
-      await refreshData();
     } catch (error) {
-      console.error("Failed to refresh Yahoo symbol mapping:", error);
+      setMarketDataError(error instanceof Error ? error.message : "Yahooシンボルの再解決に失敗しました");
     } finally {
       setRefreshingUrls(false);
     }
@@ -96,6 +114,15 @@ export function Dashboard() {
             {refreshing ? "更新中..." : "最終更新: " + new Date().toLocaleTimeString()}
           </div>
         </header>
+
+        {(error || marketDataError) && (
+          <div
+            className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+          >
+            {marketDataError ?? error}
+          </div>
+        )}
 
         {activeTab === "overview" && (
           <Overview

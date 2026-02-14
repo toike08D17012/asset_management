@@ -29,34 +29,52 @@ export function useDashboardData(): UseDashboardDataResult {
     setLoadingHoldings(true);
     setLoadingAccounts(true);
     setError(null);
+    const setApiError = (message: string) => {
+      setError((prev) => prev ?? message);
+    };
 
-    // Portfolio
     const portfolioTask = (async () => {
       try {
         const res = await fetch("/api/portfolio");
+        if (res.status === 401) {
+          if (typeof window !== "undefined") {
+            sessionStorage.removeItem("encryptionUnlocked");
+            window.location.reload();
+          }
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           setPortfolio(data.portfolio);
         } else {
-          console.error("Failed to fetch portfolio");
+          const data = await res.json().catch(() => null);
+          setApiError(
+            typeof data?.error === "string" && data.error.length > 0
+              ? data.error
+              : "ポートフォリオ情報の取得に失敗しました"
+          );
         }
-      } catch (err) {
-        console.error("Portfolio fetch error:", err);
+      } catch {
+        setApiError("ポートフォリオ情報の取得中に通信エラーが発生しました");
       } finally {
         setLoadingPortfolio(false);
       }
     })();
 
-    // Holdings
     const holdingsTask = (async () => {
       try {
-        // Cache first
         const cacheRes = await fetch("/api/holdings?aggregate=true&marketData=cache");
+        if (cacheRes.status === 401) {
+          if (typeof window !== "undefined") {
+            sessionStorage.removeItem("encryptionUnlocked");
+            window.location.reload();
+          }
+          return;
+        }
         if (cacheRes.ok) {
           const data = await cacheRes.json();
           setHoldings(data.holdings || []);
 
-          // Live update in background
           void (async () => {
             try {
               const liveRes = await fetch("/api/holdings?aggregate=true&marketData=live");
@@ -64,29 +82,31 @@ export function useDashboardData(): UseDashboardDataResult {
                 const liveData = await liveRes.json();
                 setHoldings(liveData.holdings || []);
               }
-            } catch (err) {
-              console.error("Live holdings update error:", err);
+            } catch {
+              // バックグラウンド更新は失敗しても静かに無視する
             }
           })();
         } else {
-          console.error("Failed to fetch holdings (cache)");
+          const data = await cacheRes.json().catch(() => null);
+          setApiError(
+            typeof data?.error === "string" && data.error.length > 0
+              ? data.error
+              : "保有銘柄の取得に失敗しました"
+          );
         }
-      } catch (err) {
-        console.error("Holdings fetch error:", err);
+      } catch {
+        setApiError("保有銘柄の取得中に通信エラーが発生しました");
       } finally {
         setLoadingHoldings(false);
       }
     })();
 
-    // Accounts
     const accountsTask = (async () => {
       try {
         const res = await fetch("/api/accounts");
         if (res.status === 401) {
             if (typeof window !== "undefined") {
               sessionStorage.removeItem("encryptionUnlocked");
-              // Let the component handle redirect/reload logic if needed, 
-              // or handle it here if global
               window.location.reload(); 
             }
             return;
@@ -97,12 +117,10 @@ export function useDashboardData(): UseDashboardDataResult {
           setAccounts(data.accounts || []);
         } else {
            const data = await res.json().catch(() => ({}));
-           console.error("Failed to fetch accounts:", data?.error || res.statusText);
-           setError(data?.error || "Failed to fetch accounts");
+           setError(data?.error || "口座情報の取得に失敗しました");
         }
-      } catch (err) {
-        console.error("Accounts fetch error:", err);
-        setError("Network error fetching accounts");
+      } catch {
+        setError("口座情報の取得中に通信エラーが発生しました");
       } finally {
         setLoadingAccounts(false);
       }

@@ -19,6 +19,7 @@ type ColumnId =
   | "yahooLink"
   | "googleLink";
 
+export type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
 type SortDirection = "asc" | "desc";
 
 interface SortState {
@@ -50,10 +51,14 @@ const BASE_COLUMNS: ColumnDef[] = [
 
 const SORT_STORAGE_KEY = "holdings-table-sort-v1";
 const DEFAULT_SORT_STATE: SortState = { columnId: "security", direction: "asc" };
-const REFRESHABLE_COLUMNS: ColumnId[] = ["sector", "dividendYield", "currentPrice"];
+const REFRESHABLE_COLUMNS: readonly MarketColumnId[] = ["sector", "dividendYield", "currentPrice"];
 
 function isColumnId(value: unknown): value is ColumnId {
   return typeof value === "string" && BASE_COLUMNS.some((c) => c.id === value);
+}
+
+function isMarketColumnId(value: ColumnId): value is MarketColumnId {
+  return REFRESHABLE_COLUMNS.includes(value as MarketColumnId);
 }
 
 function getDisplayColumns(isMutualFundOnly: boolean): ColumnDef[] {
@@ -141,10 +146,10 @@ export function HoldingsTable({
   title?: string;
   description?: string;
   holdings: HoldingData[];
-  onForceRefreshColumn?: (columnId: ColumnId) => void;
+  onForceRefreshColumn?: (columnId: MarketColumnId) => void;
   onForceRefreshAll?: () => void;
   onForceRefreshUrls?: () => void;
-  refreshingColumns?: Set<ColumnId>;
+  refreshingColumns?: ReadonlySet<MarketColumnId>;
   refreshingAll?: boolean;
   refreshingUrls?: boolean;
 }) {
@@ -355,19 +360,19 @@ export function HoldingsTable({
                         </>
                       )}
 
-                      {REFRESHABLE_COLUMNS.includes(column.id) && onForceRefreshColumn && (
+                      {isMarketColumnId(column.id) && onForceRefreshColumn && (
                         <button
                           type="button"
-                          onClick={() => onForceRefreshColumn(column.id)}
-                          disabled={isAnyRefreshInProgress && !refreshingColumns?.has(column.id)}
+                          onClick={() => onForceRefreshColumn(column.id as MarketColumnId)}
+                          disabled={isAnyRefreshInProgress && !refreshingColumns?.has(column.id as MarketColumnId)}
                           className={`text-muted-foreground hover:text-primary disabled:opacity-50 ml-1 transition-opacity ${
-                            refreshingColumns?.has(column.id)
+                            refreshingColumns?.has(column.id as MarketColumnId)
                               ? "opacity-100 text-primary"
                               : "opacity-0 group-hover/header:opacity-100 focus:opacity-100"
                           }`}
                           title="このカラムだけ再取得"
                         >
-                          {refreshingColumns?.has(column.id) ? "…" : "↻"}
+                          {refreshingColumns?.has(column.id as MarketColumnId) ? "…" : "↻"}
                         </button>
                       )}
                     </span>
@@ -377,7 +382,7 @@ export function HoldingsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border bg-card">
-            {data.map((h, i) => {
+            {data.map((h) => {
               const qty = h.totalQuantity?.value ?? h.quantity?.value ?? 0;
               const unit = h.totalQuantity?.unit ?? h.quantity?.unit ?? "shares";
               const avgPrice = h.weightedAveragePrice?.amount ?? h.averagePurchasePrice?.amount ?? 0;
@@ -404,7 +409,9 @@ export function HoldingsTable({
                     return (
                       <div className="flex items-center gap-3 min-w-[180px]">
                         <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-bold shrink-0 ${
-                            isStock ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" : "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300"
+                            isStock
+                              ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
                           }`}
                         >
                           {isStock ? "株" : "信"}
@@ -466,7 +473,10 @@ export function HoldingsTable({
               };
 
               return (
-                <tr key={`${h.security.ticker}-${i}`} className="group hover:bg-muted/50 transition-colors">
+                <tr
+                  key={`${h.security.type}:${h.security.currency}:${h.security.ticker}:${h.security.name}`}
+                  className="group hover:bg-muted/50 transition-colors"
+                >
                   {columns.filter(c => visibleColumns.has(c.id)).map((column) => (
                      <td key={column.id} className={`px-6 py-4 whitespace-nowrap ${
                         column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'

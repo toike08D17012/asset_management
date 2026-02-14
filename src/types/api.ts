@@ -3,7 +3,7 @@
 // コンポーネント間で共有する型を一元管理
 // ============================================================
 
-import type { SecurityType, Currency, QuantityUnit } from "@/domain/types";
+import type { SecurityType, Currency, QuantityUnit, Brokerage } from "@/domain/types";
 
 /**
  * 証券口座サマリー（API応答 + UI表示用）
@@ -11,7 +11,7 @@ import type { SecurityType, Currency, QuantityUnit } from "@/domain/types";
 export interface AccountSummary {
   readonly id: string;
   readonly name: string;
-  readonly brokerage: string;
+  readonly brokerage: Brokerage;
   readonly createdAt: string;
   readonly lastSyncedAt: string | null;
 }

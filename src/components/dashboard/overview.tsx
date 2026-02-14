@@ -1,11 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
 import { PortfolioSummary } from "@/components/portfolio-summary";
-import { HoldingsTable } from "@/components/holdings-table";
+import { HoldingsTable, type MarketColumnId } from "@/components/holdings-table";
 import { AssetAllocationCharts } from "@/components/dashboard/asset-allocation-charts";
 import type { PortfolioData, HoldingData } from "@/types/api";
 import { EmptyState } from "@/components/dashboard/empty-state";
 
-type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
 type HoldingsDisplayMode = "mixed" | "split";
 type SplitAssetType = "stock" | "mutualFund";
 const STORAGE_KEY = "dashboard-overview-display-mode";
@@ -157,10 +156,10 @@ export function Overview({
               title="全銘柄一覧"
               description="すべての保有銘柄を表示します"
               holdings={holdings}
-              onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
+              onForceRefreshColumn={(id) => onRefreshCol?.(id)}
               onForceRefreshAll={onRefreshAll}
               onForceRefreshUrls={onRefreshUrls}
-              refreshingColumns={refreshingColumns as any} 
+              refreshingColumns={refreshingColumns}
               refreshingAll={refreshingAll}
               refreshingUrls={refreshingUrls}
             />
@@ -198,10 +197,10 @@ export function Overview({
               title={activeSplitTitle}
               description={activeSplitDescription}
               holdings={activeSplitHoldings}
-              onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
+              onForceRefreshColumn={(id) => onRefreshCol?.(id)}
               onForceRefreshAll={onRefreshAll}
               onForceRefreshUrls={onRefreshUrls}
-              refreshingColumns={refreshingColumns as any}
+              refreshingColumns={refreshingColumns}
               refreshingAll={refreshingAll}
               refreshingUrls={refreshingUrls}
             />
