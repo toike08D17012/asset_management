@@ -265,18 +265,7 @@ async function fetchMarketDataByMode(
     return fetchFromYahooJapanPage(input, symbol, googleSymbol, forceResolveSymbol);
   }
 
-  // auto: まず Yahoo!ファイナンス日本版を優先して取得する
-  const fromYahooJapan = await fetchFromYahooJapanPage(
-    input,
-    symbol,
-    googleSymbol,
-    forceResolveSymbol,
-  );
-  if (fromYahooJapan) {
-    return fromYahooJapan;
-  }
-
-  // 取得できなかった場合のみ .com API にフォールバック
+  // auto: まず .com API を優先し、取得できなかった場合のみ Yahoo!ファイナンス日本版へフォールバック
   if (symbol) {
     const fromApi = await fetchFromYahooQuoteApi(symbol, googleSymbol);
     if (fromApi) {
@@ -284,7 +273,7 @@ async function fetchMarketDataByMode(
     }
   }
 
-  return null;
+  return fetchFromYahooJapanPage(input, symbol, googleSymbol, forceResolveSymbol);
 }
 
 async function fetchFromYahooQuoteApi(
@@ -1072,8 +1061,9 @@ function extractNumberByPatterns(html: string, patterns: RegExp[]): number | nul
 }
 
 function normalizeDividendPercent(value: number): number {
-  // 3.2 -> 0.032, 0.032 -> 0.032 の両方を許容する
-  return value > 1 ? value / 100 : value;
+  // Yahoo!ファイナンス日本版の shareDividendYield / distributionYield 系は
+  // 「%値」で返るため、1%未満 (例: 0.59) も必ず 100 で割って比率へ変換する。
+  return value / 100;
 }
 
 function htmlToPlainText(html: string): string {

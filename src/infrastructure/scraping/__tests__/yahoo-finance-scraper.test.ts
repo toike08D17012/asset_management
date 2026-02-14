@@ -132,6 +132,27 @@ describe("yahoo-finance-scraper", () => {
     expect(parsed?.dividendYield).toBeCloseTo(0.0252, 6);
   });
 
+  it("1%未満の配当利回りもパーセントとして正規化できる", () => {
+    const html = `
+      <html><head></head><body>
+      <script>
+      window.__PRELOADED_STATE__ = {
+        "mainStocksPriceBoard": {
+          "priceBoard": {
+            "shareDividendYield": 0.59
+          }
+        }
+      };
+      </script>
+      </body></html>
+    `;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.dividendYield).toBeCloseTo(0.0059, 6);
+  });
+
   it("投資信託ページ相当のHTMLから基準価額を抽出できる", () => {
     const html = `
       <html><body>
