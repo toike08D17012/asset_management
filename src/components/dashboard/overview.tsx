@@ -7,7 +7,9 @@ import { EmptyState } from "@/components/dashboard/empty-state";
 
 type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
 type HoldingsDisplayMode = "mixed" | "split";
+type SplitAssetType = "stock" | "mutualFund";
 const STORAGE_KEY = "dashboard-overview-display-mode";
+const SPLIT_ASSET_TYPE_STORAGE_KEY = "dashboard-overview-split-asset-type";
 
 interface OverviewProps {
   portfolio: PortfolioData | null;
@@ -33,6 +35,7 @@ export function Overview({
   onImport,
 }: OverviewProps) {
   const [displayMode, setDisplayMode] = useState<HoldingsDisplayMode>("mixed");
+  const [splitAssetType, setSplitAssetType] = useState<SplitAssetType>("stock");
 
   useEffect(() => {
     try {
@@ -40,8 +43,13 @@ export function Overview({
       if (savedMode === "mixed" || savedMode === "split") {
         setDisplayMode(savedMode);
       }
+
+      const savedSplitAssetType = localStorage.getItem(SPLIT_ASSET_TYPE_STORAGE_KEY);
+      if (savedSplitAssetType === "stock" || savedSplitAssetType === "mutualFund") {
+        setSplitAssetType(savedSplitAssetType);
+      }
     } catch (e) {
-      console.warn("Failed to read display mode from local storage", e);
+      console.warn("Failed to read dashboard settings from local storage", e);
     }
   }, []);
 
@@ -54,6 +62,15 @@ export function Overview({
     }
   };
 
+  const handleSplitAssetTypeChange = (type: SplitAssetType) => {
+    setSplitAssetType(type);
+    try {
+      localStorage.setItem(SPLIT_ASSET_TYPE_STORAGE_KEY, type);
+    } catch (e) {
+      console.warn("Failed to save split asset type to local storage", e);
+    }
+  };
+
   const stockHoldings = useMemo(() => 
     holdings.filter(h => h.security.type === "stock"), 
     [holdings]
@@ -63,6 +80,25 @@ export function Overview({
     holdings.filter(h => h.security.type === "mutualFund"), 
     [holdings]
   );
+
+  const activeSplitAssetType = useMemo<SplitAssetType>(() => {
+    if (splitAssetType === "stock" && stockHoldings.length === 0 && mutualFundHoldings.length > 0) {
+      return "mutualFund";
+    }
+
+    if (splitAssetType === "mutualFund" && mutualFundHoldings.length === 0 && stockHoldings.length > 0) {
+      return "stock";
+    }
+
+    return splitAssetType;
+  }, [splitAssetType, stockHoldings.length, mutualFundHoldings.length]);
+
+  const activeSplitHoldings = activeSplitAssetType === "stock" ? stockHoldings : mutualFundHoldings;
+  const activeSplitTitle = activeSplitAssetType === "stock" ? "株式・ETF・REIT" : "投資信託";
+  const activeSplitDescription =
+    activeSplitAssetType === "stock"
+      ? "市場で取引される銘柄"
+      : "基準価額で取引される銘柄";
 
   if (loadingPortfolio || loadingHoldings) {
     if (!portfolio && holdings.length === 0) {
@@ -124,31 +160,43 @@ export function Overview({
             />
           </div>
         ) : (
-          <div className="space-y-12">
-            <div className="space-y-6">
-              <AssetAllocationCharts holdings={stockHoldings} />
-              <HoldingsTable
-                title="株式・ETF・REIT"
-                description="市場で取引される銘柄"
-                holdings={stockHoldings}
-                onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
-                onForceRefreshAll={onRefreshAll}
-                refreshingColumns={refreshingColumns as any}
-                refreshingAll={refreshing}
-              />
+          <div className="space-y-6">
+            <div className="flex items-center justify-end">
+              <div className="flex items-center space-x-2 bg-muted p-1 rounded-lg">
+                <button
+                  onClick={() => handleSplitAssetTypeChange("stock")}
+                  disabled={stockHoldings.length === 0}
+                  className={`px-3 py-1 text-sm font-medium rounded-md transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    activeSplitAssetType === "stock"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  株式・ETF・REIT
+                </button>
+                <button
+                  onClick={() => handleSplitAssetTypeChange("mutualFund")}
+                  disabled={mutualFundHoldings.length === 0}
+                  className={`px-3 py-1 text-sm font-medium rounded-md transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    activeSplitAssetType === "mutualFund"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  投資信託
+                </button>
+              </div>
             </div>
-            <div className="space-y-6">
-              <AssetAllocationCharts holdings={mutualFundHoldings} />
-              <HoldingsTable
-                title="投資信託"
-                description="基準価額で取引される銘柄"
-                holdings={mutualFundHoldings}
-                onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
-                onForceRefreshAll={onRefreshAll}
-                refreshingColumns={refreshingColumns as any}
-                refreshingAll={refreshing}
-              />
-            </div>
+            <AssetAllocationCharts holdings={activeSplitHoldings} />
+            <HoldingsTable
+              title={activeSplitTitle}
+              description={activeSplitDescription}
+              holdings={activeSplitHoldings}
+              onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
+              onForceRefreshAll={onRefreshAll}
+              refreshingColumns={refreshingColumns as any}
+              refreshingAll={refreshing}
+            />
           </div>
         )}
       </div>
