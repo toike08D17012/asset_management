@@ -58,7 +58,7 @@ export function PortfolioSummary({
           {!card.simple && (
             <div className="mt-1">
               {card.trend !== undefined && (
-                <div className={`flex items-center text-sm font-medium ${card.trend >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                <div className={`flex items-center text-sm font-medium ${card.trend >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
                   {card.trend >= 0 ? "+" : ""}{formatCurrency(card.trend, card.currency)}
                   <span className="ml-1">
                     ({card.trend >= 0 ? "+" : ""}{card.trendPercent?.toFixed(2)}%)

@@ -342,10 +342,10 @@ export function HoldingsTable({
                   case "marketValue": return <span className="text-sm font-medium text-foreground">{fmt(currentValue)}</span>;
                   case "gainLoss": return (
                       <div className="flex flex-col items-end">
-                        <span className={`text-sm font-medium ${isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        <span className={`text-sm font-medium ${isPositive ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
                           {isPositive ? "+" : ""}{fmt(gainLoss)}
                         </span>
-                         <span className={`text-xs ${isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                         <span className={`text-xs ${isPositive ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
                           ({isPositive ? "+" : ""}{gainLossPercent.toFixed(2)}%)
                          </span>
                       </div>
