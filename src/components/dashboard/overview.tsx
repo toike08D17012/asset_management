@@ -16,10 +16,12 @@ interface OverviewProps {
   holdings: HoldingData[];
   loadingPortfolio: boolean;
   loadingHoldings: boolean;
-  refreshing: boolean;
+  refreshingAll?: boolean;
   onRefreshCol?: (col: MarketColumnId) => void;
   onRefreshAll?: () => void;
+  onRefreshUrls?: () => void;
   refreshingColumns: Set<MarketColumnId>;
+  refreshingUrls?: boolean;
   onImport: () => void;
 }
 
@@ -28,10 +30,12 @@ export function Overview({
   holdings,
   loadingPortfolio,
   loadingHoldings,
-  refreshing,
+  refreshingAll,
   onRefreshCol,
   onRefreshAll,
+  onRefreshUrls,
   refreshingColumns,
+  refreshingUrls,
   onImport,
 }: OverviewProps) {
   const [displayMode, setDisplayMode] = useState<HoldingsDisplayMode>("mixed");
@@ -155,8 +159,10 @@ export function Overview({
               holdings={holdings}
               onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
               onForceRefreshAll={onRefreshAll}
+              onForceRefreshUrls={onRefreshUrls}
               refreshingColumns={refreshingColumns as any} 
-              refreshingAll={refreshing}
+              refreshingAll={refreshingAll}
+              refreshingUrls={refreshingUrls}
             />
           </div>
         ) : (
@@ -194,8 +200,10 @@ export function Overview({
               holdings={activeSplitHoldings}
               onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
               onForceRefreshAll={onRefreshAll}
+              onForceRefreshUrls={onRefreshUrls}
               refreshingColumns={refreshingColumns as any}
-              refreshingAll={refreshing}
+              refreshingAll={refreshingAll}
+              refreshingUrls={refreshingUrls}
             />
           </div>
         )}

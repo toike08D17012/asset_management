@@ -29,6 +29,11 @@ export function getDb() {
     sqlite.pragma("foreign_keys = ON");
     _db = drizzle(sqlite, { schema });
   }
+
+  const sqlite = (_db as unknown as { $client: Database.Database }).$client;
+  if (sqlite && typeof sqlite.prepare === "function") {
+    ensureMarketDataCacheColumns(sqlite);
+  }
   return _db;
 }
 
@@ -104,8 +109,20 @@ function createTables(sqlite: Database.Database): void {
       google_symbol TEXT NOT NULL,
       sector TEXT,
       dividend_yield REAL,
+      current_price REAL,
       fetched_date TEXT NOT NULL,
       fetched_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS market_symbol_cache (
+      id TEXT PRIMARY KEY,
+      ticker TEXT NOT NULL,
+      name TEXT,
+      currency TEXT NOT NULL CHECK(currency IN ('JPY', 'USD')),
+      security_type TEXT NOT NULL CHECK(security_type IN ('stock', 'mutualFund')),
+      yahoo_symbol TEXT NOT NULL,
+      resolved_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_holdings_account_id ON holdings(account_id);
@@ -113,7 +130,33 @@ function createTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp);
     CREATE INDEX IF NOT EXISTS idx_market_data_cache_ticker ON market_data_cache(ticker);
     CREATE INDEX IF NOT EXISTS idx_market_data_cache_fetched_date ON market_data_cache(fetched_date);
+    CREATE INDEX IF NOT EXISTS idx_market_symbol_cache_ticker ON market_symbol_cache(ticker);
+    CREATE INDEX IF NOT EXISTS idx_market_symbol_cache_symbol ON market_symbol_cache(yahoo_symbol);
   `);
+
+  ensureMarketDataCacheColumns(sqlite);
+}
+
+function ensureMarketDataCacheColumns(sqlite: Database.Database): void {
+  type TableInfoRow = {
+    name: string;
+  };
+  try {
+    const columns = sqlite
+      .prepare("PRAGMA table_info(market_data_cache)")
+      .all() as TableInfoRow[];
+
+    if (columns.length === 0) {
+      return;
+    }
+
+    const hasCurrentPrice = columns.some((column) => column.name === "current_price");
+    if (!hasCurrentPrice) {
+      sqlite.exec("ALTER TABLE market_data_cache ADD COLUMN current_price REAL");
+    }
+  } catch {
+    // DB初期化直後など、テーブル未作成タイミングではスキップ
+  }
 }
 
 export { schema };

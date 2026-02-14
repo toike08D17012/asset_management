@@ -74,8 +74,23 @@ export const marketDataCache = sqliteTable("market_data_cache", {
   googleSymbol: text("google_symbol").notNull(),
   sector: text("sector"),
   dividendYield: real("dividend_yield"),
+  currentPrice: real("current_price"),
   fetchedDate: text("fetched_date").notNull(), // YYYY-MM-DD (JST)
   fetchedAt: text("fetched_at").notNull(),
+});
+
+// --- Market Symbol Cache Table (銘柄名→Yahooシンボルの恒久キャッシュ) ---
+export const marketSymbolCache = sqliteTable("market_symbol_cache", {
+  id: text("id").primaryKey(),
+  ticker: text("ticker").notNull(),
+  name: text("name"),
+  currency: text("currency", { enum: ["JPY", "USD"] }).notNull(),
+  securityType: text("security_type", {
+    enum: ["stock", "mutualFund"],
+  }).notNull(),
+  yahooSymbol: text("yahoo_symbol").notNull(),
+  resolvedAt: text("resolved_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 // Type exports for Drizzle
@@ -86,3 +101,4 @@ export type NewHoldingRow = typeof holdings.$inferInsert;
 export type SnapshotRow = typeof snapshots.$inferSelect;
 export type EncryptionKeyRow = typeof encryptionKeys.$inferSelect;
 export type MarketDataCacheRow = typeof marketDataCache.$inferSelect;
+export type MarketSymbolCacheRow = typeof marketSymbolCache.$inferSelect;

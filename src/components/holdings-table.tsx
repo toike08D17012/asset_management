@@ -49,6 +49,7 @@ const ALL_COLUMNS: ColumnDef[] = [
 
 const SORT_STORAGE_KEY = "holdings-table-sort-v1";
 const DEFAULT_SORT_STATE: SortState = { columnId: "security", direction: "asc" };
+const REFRESHABLE_COLUMNS: ColumnId[] = ["sector", "dividendYield", "currentPrice"];
 
 function isColumnId(value: unknown): value is ColumnId {
   return typeof value === "string" && ALL_COLUMNS.some((c) => c.id === value);
@@ -73,7 +74,7 @@ function getSortValue(h: HoldingData, columnId: ColumnId): number | string {
   const divisor = getMutualFundDivisor(h.security.type);
 
   switch (columnId) {
-    case "security": return h.security.ticker;
+    case "security": return h.security.type === "mutualFund" ? h.security.name : h.security.ticker;
     case "sector": return h.sector ?? "";
     case "dividendYield": return h.dividendYield ?? -1;
     case "dividendYieldCost": {
@@ -105,16 +106,20 @@ export function HoldingsTable({
   holdings,
   onForceRefreshColumn,
   onForceRefreshAll,
+  onForceRefreshUrls,
   refreshingColumns,
   refreshingAll,
+  refreshingUrls,
 }: {
   title?: string;
   description?: string;
   holdings: HoldingData[];
   onForceRefreshColumn?: (columnId: ColumnId) => void;
   onForceRefreshAll?: () => void;
+  onForceRefreshUrls?: () => void;
   refreshingColumns?: Set<ColumnId>;
   refreshingAll?: boolean;
+  refreshingUrls?: boolean;
 }) {
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(new Set(ALL_COLUMNS.map((c) => c.id)));
   const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false);
@@ -156,62 +161,103 @@ export function HoldingsTable({
     return sorted;
   }, [holdings, sortState]);
 
+  const refreshingColumnIds = useMemo(
+    () => REFRESHABLE_COLUMNS.filter((columnId) => refreshingColumns?.has(columnId)),
+    [refreshingColumns]
+  );
+  const refreshingColumnLabels = useMemo(
+    () =>
+      refreshingColumnIds.map(
+        (columnId) => ALL_COLUMNS.find((column) => column.id === columnId)?.label ?? columnId
+      ),
+    [refreshingColumnIds]
+  );
+  const isAnyRefreshInProgress = Boolean(
+    refreshingAll || refreshingUrls || refreshingColumnIds.length > 0
+  );
+  const refreshStatusText = refreshingAll
+    ? "全更新を実行中..."
+    : refreshingUrls
+      ? "URL更新を実行中..."
+      : refreshingColumnLabels.length > 0
+        ? `${refreshingColumnLabels.join("・")}を更新中...`
+        : null;
+
   return (
-    <div className="bg-card rounded-xl shadow-sm overflow-hidden border border-border">
-      <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/30">
+    <div className="bg-card rounded-xl shadow-sm overflow-hidden border border-border" aria-busy={isAnyRefreshInProgress}>
+      <div className="px-6 py-4 border-b border-border flex justify-between items-start bg-muted/30">
         <div>
           <h2 className="text-lg font-semibold text-foreground">{title ?? "保有証券一覧"}</h2>
           <p className="text-sm text-muted-foreground mt-1">
             {description ?? "保有しているすべての銘柄を表示します"}
           </p>
         </div>
-        <div className="flex gap-2">
-           {onForceRefreshAll && (
-            <button
-              onClick={onForceRefreshAll}
-              disabled={refreshingAll}
-              className="inline-flex items-center px-3 py-2 border border-border shadow-sm text-sm leading-4 font-medium rounded-md text-foreground bg-background hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 transition-colors"
-            >
-              {refreshingAll ? "更新中..." : "全更新"}
-            </button>
-          )}
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
-              className="inline-flex items-center px-3 py-2 border border-border shadow-sm text-sm leading-4 font-medium rounded-md text-foreground bg-background hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
-            >
-              表示項目
-              <svg className="ml-2 -mr-0.5 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            </button>
-
-            {isColumnSelectorOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setIsColumnSelectorOpen(false)} />
-                <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-popover ring-1 ring-black ring-opacity-5 z-20 max-h-96 overflow-y-auto">
-                  <div className="py-1" role="menu" aria-orientation="vertical">
-                    {ALL_COLUMNS.map((col) => (
-                      <div key={col.id} className="flex items-center px-4 py-2 hover:bg-muted/50 cursor-pointer" onClick={() => toggleColumn(col.id)}>
-                        <input
-                          id={`col-${col.id}`}
-                          type="checkbox"
-                          checked={visibleColumns.has(col.id)}
-                          onChange={() => toggleColumn(col.id)}
-                          className="h-4 w-4 text-primary focus:ring-primary border-border rounded accent-primary"
-                        />
-                        <label htmlFor={`col-${col.id}`} className="ml-3 block text-sm text-foreground cursor-pointer w-full select-none">
-                          {col.label}
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-2">
+            {onForceRefreshUrls && (
+              <button
+                type="button"
+                onClick={onForceRefreshUrls}
+                disabled={isAnyRefreshInProgress}
+                className="inline-flex items-center px-2 py-1 border border-transparent text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+                title="Yahoo URLの再解決（低頻度用）"
+              >
+                {refreshingUrls ? "URL更新中..." : "URL更新"}
+              </button>
             )}
+
+            {onForceRefreshAll && (
+              <button
+                onClick={onForceRefreshAll}
+                disabled={isAnyRefreshInProgress}
+                className="inline-flex items-center px-3 py-2 border border-border shadow-sm text-sm leading-4 font-medium rounded-md text-foreground bg-background hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 transition-colors"
+              >
+                {refreshingAll ? "更新中..." : "全更新"}
+              </button>
+            )}
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
+                className="inline-flex items-center px-3 py-2 border border-border shadow-sm text-sm leading-4 font-medium rounded-md text-foreground bg-background hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary transition-colors"
+              >
+                表示項目
+                <svg className="ml-2 -mr-0.5 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
+
+              {isColumnSelectorOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setIsColumnSelectorOpen(false)} />
+                  <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-popover ring-1 ring-black ring-opacity-5 z-20 max-h-96 overflow-y-auto">
+                    <div className="py-1" role="menu" aria-orientation="vertical">
+                      {ALL_COLUMNS.map((col) => (
+                        <div key={col.id} className="flex items-center px-4 py-2 hover:bg-muted/50 cursor-pointer" onClick={() => toggleColumn(col.id)}>
+                          <input
+                            id={`col-${col.id}`}
+                            type="checkbox"
+                            checked={visibleColumns.has(col.id)}
+                            onChange={() => toggleColumn(col.id)}
+                            className="h-4 w-4 text-primary focus:ring-primary border-border rounded accent-primary"
+                          />
+                          <label htmlFor={`col-${col.id}`} className="ml-3 block text-sm text-foreground cursor-pointer w-full select-none">
+                            {col.label}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
+          {refreshStatusText && (
+            <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+              {refreshStatusText}
+            </p>
+          )}
         </div>
       </div>
 
@@ -278,13 +324,15 @@ export function HoldingsTable({
                         </>
                       )}
 
-                      {(column.id === "sector" || column.id === "dividendYield" || column.id === "currentPrice") && onForceRefreshColumn && (
+                      {REFRESHABLE_COLUMNS.includes(column.id) && onForceRefreshColumn && (
                         <button
                           type="button"
                           onClick={() => onForceRefreshColumn(column.id)}
-                          disabled={refreshingColumns?.has(column.id)}
+                          disabled={isAnyRefreshInProgress && !refreshingColumns?.has(column.id)}
                           className={`text-muted-foreground hover:text-primary disabled:opacity-50 ml-1 transition-opacity ${
-                            refreshingColumns?.has(column.id) ? "opacity-100" : "opacity-0 group-hover/header:opacity-100 focus:opacity-100"
+                            refreshingColumns?.has(column.id)
+                              ? "opacity-100 text-primary"
+                              : "opacity-0 group-hover/header:opacity-100 focus:opacity-100"
                           }`}
                           title="このカラムだけ再取得"
                         >
@@ -330,8 +378,14 @@ export function HoldingsTable({
                           {isStock ? "株" : "信"}
                         </span>
                         <div>
-                          <p className="font-medium text-foreground">{h.security.ticker}</p>
-                          <p className="text-xs text-muted-foreground truncate max-w-[150px]">{h.security.name}</p>
+                          {isMutualFund ? (
+                            <p className="font-medium text-foreground truncate max-w-[260px]">{h.security.name}</p>
+                          ) : (
+                            <>
+                              <p className="font-medium text-foreground">{h.security.ticker}</p>
+                              <p className="text-xs text-muted-foreground truncate max-w-[150px]">{h.security.name}</p>
+                            </>
+                          )}
                         </div>
                       </div>
                     );
@@ -355,7 +409,10 @@ export function HoldingsTable({
                       </div>
                     );
                   case "dividends": return <span className="text-sm text-foreground">{dividendAmountDisplay}</span>;
-                  case "yahooLink": return <a href={`https://finance.yahoo.com/quote/${h.yahooSymbol ?? h.security.ticker}`} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80 text-sm hover:underline">Yahoo</a>;
+                  case "yahooLink": {
+                    const symbol = encodeURIComponent(h.yahooSymbol ?? h.security.ticker);
+                    return <a href={`https://finance.yahoo.co.jp/quote/${symbol}`} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80 text-sm hover:underline">Yahoo</a>;
+                  }
                   case "googleLink": {
                     const symbol = h.googleSymbol ?? h.security.ticker;
                     let finalSymbol = symbol;

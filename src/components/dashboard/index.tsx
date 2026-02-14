@@ -25,13 +25,15 @@ export function Dashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [showImport, setShowImport] = useState(false);
   const [refreshingColumns, setRefreshingColumns] = useState<Set<MarketColumnId>>(new Set());
+  const [refreshingUrls, setRefreshingUrls] = useState(false);
+  const [refreshingAllMarketData, setRefreshingAllMarketData] = useState(false);
 
   // Logic for partial refresh (copied from original dashboard but simplified)
   const forceRefreshColumn = async (columnId: MarketColumnId) => {
-    if (refreshingColumns.has(columnId)) return;
+    if (refreshingColumns.has(columnId) || refreshingUrls || refreshingAllMarketData) return;
     setRefreshingColumns(prev => new Set(prev).add(columnId));
     try {
-      await fetch(`/api/holdings?refreshColumn=${columnId}`);
+      await fetch("/api/holdings?aggregate=true&marketData=live&forceRefresh=true");
       await refreshData();
     } catch (error) {
        console.error(`Failed to refresh column ${columnId}:`, error);
@@ -45,12 +47,31 @@ export function Dashboard() {
   };
 
   const forceRefreshAllMarketData = async () => {
+     if (refreshingAllMarketData || refreshingUrls || refreshingColumns.size > 0) return;
+     setRefreshingAllMarketData(true);
      try {
-       await fetch("/api/holdings?refreshAll=true");
+       await fetch("/api/holdings?aggregate=true&marketData=live&forceRefresh=true");
        await refreshData();
      } catch (error) {
        console.error("Failed to refresh all market data:", error);
+     } finally {
+       setRefreshingAllMarketData(false);
      }
+  };
+
+  const forceResolveYahooUrls = async () => {
+    if (refreshingUrls || refreshingAllMarketData || refreshingColumns.size > 0) return;
+    setRefreshingUrls(true);
+    try {
+      await fetch(
+        "/api/holdings?aggregate=true&marketData=live&forceRefresh=true&forceResolveSymbol=true"
+      );
+      await refreshData();
+    } catch (error) {
+      console.error("Failed to refresh Yahoo symbol mapping:", error);
+    } finally {
+      setRefreshingUrls(false);
+    }
   };
 
   const handleTabChange = (tab: DashboardTab) => {
@@ -82,10 +103,12 @@ export function Dashboard() {
             holdings={holdings}
             loadingPortfolio={loadingPortfolio}
             loadingHoldings={loadingHoldings}
-            refreshing={refreshing}
+            refreshingAll={refreshingAllMarketData}
             refreshingColumns={refreshingColumns}
             onRefreshCol={forceRefreshColumn}
             onRefreshAll={forceRefreshAllMarketData}
+            onRefreshUrls={forceResolveYahooUrls}
+            refreshingUrls={refreshingUrls}
             onImport={() => setShowImport(true)}
           />
         )}

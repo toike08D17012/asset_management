@@ -11,6 +11,7 @@ import {
   fetchYahooMarketDataBatch,
   getYahooMarketDataBatchFromCache,
   marketDataInputKey,
+  normalizeYahooSymbol,
   toGoogleFinanceSymbol,
   type MarketDataInput,
 } from "@/infrastructure/scraping/yahoo-finance-scraper";
@@ -18,7 +19,7 @@ import {
 type MarketDataResponseMode = "cache" | "live";
 
 async function enrichHoldingsWithMarketData<T extends {
-  security: { ticker: string; currency: "JPY" | "USD"; type: "stock" | "mutualFund" };
+  security: { ticker: string; name?: string; currency: "JPY" | "USD"; type: "stock" | "mutualFund" };
   currentPrice: { amount: number; currency: "JPY" | "USD" };
 }>(holdings: T[]): Promise<Array<T & {
   sector?: string | null;
@@ -26,16 +27,17 @@ async function enrichHoldingsWithMarketData<T extends {
   yahooSymbol?: string;
   googleSymbol?: string;
 }>> {
-  return enrichHoldingsWithDataSource(holdings, "live", false);
+  return enrichHoldingsWithDataSource(holdings, "live", false, false);
 }
 
 async function enrichHoldingsWithDataSource<T extends {
-  security: { ticker: string; currency: "JPY" | "USD"; type: "stock" | "mutualFund" };
+  security: { ticker: string; name?: string; currency: "JPY" | "USD"; type: "stock" | "mutualFund" };
   currentPrice: { amount: number; currency: "JPY" | "USD" };
 }>(
   holdings: T[],
   mode: MarketDataResponseMode,
   forceRefresh: boolean,
+  forceResolveSymbol: boolean,
 ): Promise<Array<T & {
   sector?: string | null;
   dividendYield?: number | null;
@@ -44,6 +46,7 @@ async function enrichHoldingsWithDataSource<T extends {
 }>> {
   const inputs: MarketDataInput[] = holdings.map((holding) => ({
     ticker: holding.security.ticker,
+    name: holding.security.name,
     currency: holding.security.currency,
     securityType: holding.security.type,
   }));
@@ -54,15 +57,18 @@ async function enrichHoldingsWithDataSource<T extends {
       : await fetchYahooMarketDataBatch(inputs, {
           minIntervalMs: 250,
           forceRefresh,
+          forceResolveSymbol,
         });
 
   const enriched = holdings.map((holding) => {
     const input: MarketDataInput = {
       ticker: holding.security.ticker,
+      name: holding.security.name,
       currency: holding.security.currency,
       securityType: holding.security.type,
     };
     const marketData = marketDataMap.get(marketDataInputKey(input)) ?? null;
+    const normalizedYahooSymbol = normalizeYahooSymbol(input);
 
     return {
       ...holding,
@@ -72,7 +78,7 @@ async function enrichHoldingsWithDataSource<T extends {
           : holding.currentPrice,
       sector: marketData?.sector ?? null,
       dividendYield: marketData?.dividendYield ?? null,
-      yahooSymbol: marketData?.yahooSymbol ?? holding.security.ticker,
+      yahooSymbol: marketData?.yahooSymbol ?? normalizedYahooSymbol ?? holding.security.ticker,
       googleSymbol: marketData?.googleSymbol ?? toGoogleFinanceSymbol(input),
     };
   });
@@ -89,13 +95,19 @@ export const GET = requireAuth(async (request: NextRequest) => {
     const aggregate = searchParams.get("aggregate") === "true";
     const accountId = searchParams.get("accountId");
     const forceRefresh = searchParams.get("forceRefresh") === "true";
+    const forceResolveSymbol = searchParams.get("forceResolveSymbol") === "true";
     const marketDataMode: MarketDataResponseMode =
       searchParams.get("marketData") === "live" ? "live" : "cache";
 
     if (aggregate) {
       const result = await serviceResult.value.aggregateHoldings();
       if (!result.ok) return resultToResponse(result);
-      const holdings = await enrichHoldingsWithDataSource(result.value, marketDataMode, forceRefresh);
+      const holdings = await enrichHoldingsWithDataSource(
+        result.value,
+        marketDataMode,
+        forceRefresh,
+        forceResolveSymbol,
+      );
       return NextResponse.json({ holdings, aggregated: true });
     }
 
@@ -103,14 +115,24 @@ export const GET = requireAuth(async (request: NextRequest) => {
       const result =
         await serviceResult.value.getHoldingsByAccount(accountId);
       if (!result.ok) return resultToResponse(result);
-      const holdings = await enrichHoldingsWithDataSource(result.value, marketDataMode, forceRefresh);
+      const holdings = await enrichHoldingsWithDataSource(
+        result.value,
+        marketDataMode,
+        forceRefresh,
+        forceResolveSymbol,
+      );
       return NextResponse.json({ holdings });
     }
 
     const result = await serviceResult.value.getAllHoldings();
     if (!result.ok) return resultToResponse(result);
 
-    const holdings = await enrichHoldingsWithDataSource(result.value, marketDataMode, forceRefresh);
+    const holdings = await enrichHoldingsWithDataSource(
+      result.value,
+      marketDataMode,
+      forceRefresh,
+      forceResolveSymbol,
+    );
     return NextResponse.json({ holdings });
   }, "Failed to get holdings");
 });

@@ -11,6 +11,7 @@ export interface YahooMarketData {
 
 export interface MarketDataInput {
   readonly ticker: string;
+  readonly name?: string;
   readonly currency: Currency;
   readonly securityType: SecurityType;
 }
@@ -18,6 +19,7 @@ export interface MarketDataInput {
 export interface MarketDataBatchOptions {
   readonly minIntervalMs?: number;
   readonly forceRefresh?: boolean;
+  readonly forceResolveSymbol?: boolean;
 }
 
 export interface MarketDataCacheReadOptions {
@@ -29,6 +31,7 @@ type MarketDataSourceMode = "api" | "scraping" | "auto";
 
 export interface YahooMarketDataFetchOptions {
   readonly forceRefresh?: boolean;
+  readonly forceResolveSymbol?: boolean;
 }
 
 type CacheEntry = {
@@ -42,6 +45,16 @@ const DEFAULT_BATCH_INTERVAL_MS = 250;
 
 const YAHOO_JP_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const YAHOO_JP_SEARCH_URL_BUILDERS = [
+  (query: string) => `https://finance.yahoo.co.jp/search?p=${encodeURIComponent(query)}`,
+  (query: string) => `https://finance.yahoo.co.jp/search/?query=${encodeURIComponent(query)}`,
+];
+const MUTUAL_FUND_SYMBOL_OVERRIDES_BY_NAME: Record<string, string> = {
+  [normalizeMutualFundLookupKey("ＳＢＩ欧州高配当株式（分配）ファンド（年４回決算型）")]:
+    "8931C242",
+  [normalizeMutualFundLookupKey("ＳＢＩ日本高配当株式（分配）ファンド（年４回決算型）")]:
+    "8931123C",
+};
 
 type YahooPreloadedState = {
   readonly mainStocksPriceBoard?: {
@@ -50,6 +63,11 @@ type YahooPreloadedState = {
         readonly industryName?: string;
       };
       readonly shareDividendYield?: number | string;
+      readonly price?: number | string;
+    };
+  };
+  readonly mainFundPriceBoard?: {
+    readonly fundPrices?: {
       readonly price?: number | string;
     };
   };
@@ -67,9 +85,29 @@ export function normalizeYahooSymbol(input: MarketDataInput): string | null {
   const raw = input.ticker.trim();
   if (!raw) return null;
 
-  // アプリ内の投資信託疑似ティッカーはYahoo対象外
-  if (raw.startsWith("FUND-") || raw.startsWith("SBI-") || raw.startsWith("EMAXIS-")) {
-    return null;
+  if (input.securityType === "mutualFund") {
+    const override = getMutualFundSymbolOverride(input.name);
+    if (override) {
+      return override;
+    }
+
+    // アプリ内の投信擬似ティッカーはYahooの正式コードではない
+    if (isPseudoMutualFundTicker(raw)) {
+      return null;
+    }
+
+    // Yahooの投信コードらしい値 (例: 0331418A) はそのまま利用
+    if (isLikelyMutualFundCode(raw)) {
+      return raw.toUpperCase();
+    }
+
+    // 銘柄名(日本語/空白含む)は直接URLに使えないため検索で解決する
+    if (hasNonAscii(raw) || /\s/u.test(raw)) {
+      return null;
+    }
+
+    // 米国投信ティッカー等はそのまま利用
+    return raw.toUpperCase();
   }
 
   // 既に市場サフィックス付きの場合はそのまま利用
@@ -100,19 +138,21 @@ export async function fetchYahooMarketData(
   input: MarketDataInput,
   options?: YahooMarketDataFetchOptions,
 ): Promise<YahooMarketData | null> {
-  const symbol = normalizeYahooSymbol(input);
+  const normalizedSymbol = normalizeYahooSymbol(input);
   const googleSymbol = toGoogleFinanceSymbol(input);
-  if (!symbol) {
+  if (!normalizedSymbol && input.securityType !== "mutualFund") {
     return null;
   }
 
   const forceRefresh = options?.forceRefresh ?? false;
+  const forceResolveSymbol = options?.forceResolveSymbol ?? false;
+  const memoryCacheKey = buildMemoryCacheKey(input);
 
   const mode = getMarketDataSourceMode();
 
   // プロセス内キャッシュを優先（同一プロセスでの過剰アクセス抑止）
   if (!forceRefresh) {
-    const cached = memoryMarketDataCache.get(symbol);
+    const cached = memoryMarketDataCache.get(memoryCacheKey);
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
       return cached.value;
@@ -128,15 +168,26 @@ export async function fetchYahooMarketData(
     }
   }
 
-  const data = await fetchMarketDataByMode(symbol, googleSymbol);
+  const cachedResolvedSymbol =
+    input.securityType === "mutualFund" && !forceResolveSymbol
+      ? await getPersistedYahooSymbol(input)
+      : null;
+  const preferredSymbol = normalizedSymbol ?? cachedResolvedSymbol;
+
+  const data = await fetchMarketDataByMode(input, preferredSymbol, googleSymbol, forceResolveSymbol);
+  const resolvedSymbol = data?.yahooSymbol ?? preferredSymbol;
 
   const now = Date.now();
-  memoryMarketDataCache.set(symbol, {
+  memoryMarketDataCache.set(memoryCacheKey, {
     expiresAt: now + CACHE_TTL_MS,
     value: data,
   });
 
-  await savePersistedMarketData(input, symbol, googleSymbol, todayJst, data);
+  if (resolvedSymbol) {
+    await savePersistedYahooSymbol(input, resolvedSymbol);
+  }
+
+  await savePersistedMarketData(input, googleSymbol, todayJst, data, resolvedSymbol);
 
   return data;
 }
@@ -150,24 +201,44 @@ function getMarketDataSourceMode(): MarketDataSourceMode {
 }
 
 async function fetchMarketDataByMode(
-  symbol: string,
+  input: MarketDataInput,
+  symbol: string | null,
   googleSymbol: string,
+  forceResolveSymbol: boolean,
 ): Promise<YahooMarketData | null> {
   const mode = getMarketDataSourceMode();
 
   if (mode === "api") {
+    if (!symbol) {
+      return null;
+    }
     return fetchFromYahooQuoteApi(symbol, googleSymbol);
   }
 
   if (mode === "scraping") {
-    return fetchFromYahooJapanPage(symbol, googleSymbol);
+    return fetchFromYahooJapanPage(input, symbol, googleSymbol, forceResolveSymbol);
   }
 
-  const fromApi = await fetchFromYahooQuoteApi(symbol, googleSymbol);
-  if (fromApi) {
-    return fromApi;
+  // auto: まず Yahoo!ファイナンス日本版を優先して取得する
+  const fromYahooJapan = await fetchFromYahooJapanPage(
+    input,
+    symbol,
+    googleSymbol,
+    forceResolveSymbol,
+  );
+  if (fromYahooJapan) {
+    return fromYahooJapan;
   }
-  return fetchFromYahooJapanPage(symbol, googleSymbol);
+
+  // 取得できなかった場合のみ .com API にフォールバック
+  if (symbol) {
+    const fromApi = await fetchFromYahooQuoteApi(symbol, googleSymbol);
+    if (fromApi) {
+      return fromApi;
+    }
+  }
+
+  return null;
 }
 
 async function fetchFromYahooQuoteApi(
@@ -235,6 +306,7 @@ export async function fetchYahooMarketDataBatch(
 ): Promise<Map<string, YahooMarketData | null>> {
   const minIntervalMs = options?.minIntervalMs ?? DEFAULT_BATCH_INTERVAL_MS;
   const forceRefresh = options?.forceRefresh ?? false;
+  const forceResolveSymbol = options?.forceResolveSymbol ?? false;
 
   const uniqueInputs = new Map<string, MarketDataInput>();
   for (const input of inputs) {
@@ -250,7 +322,7 @@ export async function fetchYahooMarketDataBatch(
     }
     isFirst = false;
 
-    const marketData = await fetchYahooMarketData(input, { forceRefresh });
+    const marketData = await fetchYahooMarketData(input, { forceRefresh, forceResolveSymbol });
     results.set(key, marketData);
   }
 
@@ -311,22 +383,320 @@ export async function getYahooMarketDataBatchFromCache(
       result.set(key, {
         sector: row.sector,
         dividendYield: row.dividendYield,
-        currentPrice: null,
+        currentPrice: row.currentPrice,
         yahooSymbol: row.yahooSymbol,
         googleSymbol: row.googleSymbol,
       });
     }
 
     return result;
-  } catch {
+  } catch (error) {
+    logMarketDataDebug("getYahooMarketDataBatchFromCache", error);
     return new Map();
   }
 }
 
 async function fetchFromYahooJapanPage(
-  symbol: string,
+  input: MarketDataInput,
+  preferredSymbol: string | null,
   googleSymbol: string,
+  forceResolveSymbol: boolean,
 ): Promise<YahooMarketData | null> {
+  const resolved = await resolveYahooSymbolAndDataFromYahooJapan(
+    input,
+    preferredSymbol,
+    forceResolveSymbol && input.securityType === "mutualFund",
+  );
+  if (!resolved) {
+    return null;
+  }
+
+  return {
+    sector: resolved.data.sector,
+    dividendYield: resolved.data.dividendYield,
+    currentPrice: resolved.data.currentPrice,
+    yahooSymbol: resolved.symbol,
+    googleSymbol,
+  };
+}
+
+async function resolveYahooSymbolAndDataFromYahooJapan(
+  input: MarketDataInput,
+  preferredSymbol: string | null,
+  skipPreferredSymbol: boolean,
+): Promise<{
+  symbol: string;
+  data: {
+    sector: string | null;
+    dividendYield: number | null;
+    currentPrice: number | null;
+  };
+} | null> {
+  const triedSymbols = new Set<string>();
+
+  const trySymbol = async (candidate: string | null): Promise<{
+    symbol: string;
+    data: {
+      sector: string | null;
+      dividendYield: number | null;
+      currentPrice: number | null;
+    };
+  } | null> => {
+    const symbol = normalizeExtractedYahooSymbol(candidate);
+    if (!symbol || triedSymbols.has(symbol)) {
+      return null;
+    }
+
+    triedSymbols.add(symbol);
+    const data = await fetchYahooJapanQuotePage(symbol);
+    if (!data) {
+      return null;
+    }
+
+    return { symbol, data };
+  };
+
+  if (!skipPreferredSymbol) {
+    const preferredResult = await trySymbol(preferredSymbol);
+    if (preferredResult) {
+      return preferredResult;
+    }
+  }
+
+  if (input.securityType !== "mutualFund") {
+    return null;
+  }
+
+  const queries = buildYahooSearchQueries(input);
+  for (const query of queries) {
+    const symbols = await searchYahooSymbols(query);
+    for (const symbol of symbols) {
+      const resolved = await trySymbol(symbol);
+      if (resolved) {
+        return resolved;
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildYahooSearchQueries(input: MarketDataInput): string[] {
+  const queries: string[] = [];
+  const seen = new Set<string>();
+
+  const addQuery = (value: string | undefined): void => {
+    const query = value?.trim();
+    if (!query || seen.has(query)) {
+      return;
+    }
+    seen.add(query);
+    queries.push(query);
+  };
+
+  if (input.securityType === "mutualFund") {
+    // 投資信託は正式名称を主キーとしてURLを解決する
+    addQuery(input.name);
+    if (queries.length === 0) {
+      addQuery(input.ticker);
+    }
+    return queries;
+  }
+
+  addQuery(input.ticker);
+  addQuery(input.name);
+
+  return queries;
+}
+
+async function searchYahooSymbols(query: string): Promise<string[]> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
+    return [];
+  }
+
+  // .co.jp の検索結果ページからのみ候補を抽出する
+  return searchYahooSymbolsWithHtml(normalizedQuery);
+}
+
+async function searchYahooSymbolsWithHtml(query: string): Promise<string[]> {
+  for (const buildUrl of YAHOO_JP_SEARCH_URL_BUILDERS) {
+    const url = buildUrl(query);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": YAHOO_JP_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+          Referer: "https://finance.yahoo.co.jp/",
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const html = await response.text();
+      const symbols = rankYahooSymbolsByQueryFromSearchHtml(html, query);
+
+      if (symbols.length > 0) {
+        return symbols;
+      }
+    } catch {
+      // 次のURLパターンで再試行する
+    }
+  }
+
+  return [];
+}
+
+export function extractYahooSymbolsFromSearchHtml(html: string): string[] {
+  const candidates = extractYahooSearchCandidatesFromHtml(html);
+  const symbols: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (seen.has(candidate.symbol)) {
+      continue;
+    }
+
+    seen.add(candidate.symbol);
+    symbols.push(candidate.symbol);
+  }
+
+  return symbols;
+}
+
+export function rankYahooSymbolsByQueryFromSearchHtml(html: string, query: string): string[] {
+  const normalizedQuery = normalizeMutualFundLookupKey(query);
+  const candidates = extractYahooSearchCandidatesFromHtml(html);
+  if (candidates.length === 0) {
+    return extractYahooSymbolsFromLoosePatterns(html);
+  }
+
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      score: scoreYahooSearchCandidate(candidate, normalizedQuery),
+    }))
+    .sort((a, b) => {
+      if (a.score === b.score) {
+        return a.candidate.index - b.candidate.index;
+      }
+      return b.score - a.score;
+    });
+
+  const symbols: string[] = [];
+  const seen = new Set<string>();
+  for (const item of ranked) {
+    if (seen.has(item.candidate.symbol)) {
+      continue;
+    }
+    seen.add(item.candidate.symbol);
+    symbols.push(item.candidate.symbol);
+  }
+
+  return symbols;
+}
+
+type YahooSearchCandidate = {
+  symbol: string;
+  label: string;
+  index: number;
+};
+
+function extractYahooSearchCandidatesFromHtml(html: string): YahooSearchCandidate[] {
+  const candidates: YahooSearchCandidate[] = [];
+  const pattern =
+    /<a\b[^>]*href=["'](?:https?:\/\/finance\.yahoo\.co\.jp)?\/quote\/([^"'?#/]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+  let index = 0;
+  for (const match of html.matchAll(pattern)) {
+    const symbol = normalizeExtractedYahooSymbol(match[1]);
+    if (!symbol) {
+      continue;
+    }
+
+    const rawLabel = match[2] ?? "";
+    const label = normalizeMutualFundLookupKey(decodeHtmlEntities(stripHtmlTags(rawLabel)));
+
+    candidates.push({
+      symbol,
+      label,
+      index,
+    });
+    index += 1;
+  }
+
+  return candidates;
+}
+
+function extractYahooSymbolsFromLoosePatterns(html: string): string[] {
+  const symbols: string[] = [];
+  const seen = new Set<string>();
+  const pattern = /(?:https?:\/\/finance\.yahoo\.co\.jp)?\/quote\/([^"'?#/]+)[^"'?#]*/gi;
+
+  for (const match of html.matchAll(pattern)) {
+    const symbol = normalizeExtractedYahooSymbol(match[1]);
+    if (!symbol || seen.has(symbol)) {
+      continue;
+    }
+    seen.add(symbol);
+    symbols.push(symbol);
+  }
+
+  return symbols;
+}
+
+function scoreYahooSearchCandidate(candidate: YahooSearchCandidate, normalizedQuery: string): number {
+  let score = 0;
+
+  if (normalizedQuery.length > 0 && candidate.label.length > 0) {
+    if (candidate.label === normalizedQuery) {
+      score += 1000;
+    } else if (candidate.label.includes(normalizedQuery)) {
+      score += 700;
+    } else if (normalizedQuery.includes(candidate.label)) {
+      score += 500;
+    }
+
+    score += Math.min(getCommonPrefixLength(candidate.label, normalizedQuery), 120);
+  }
+
+  return score - candidate.index;
+}
+
+function getCommonPrefixLength(a: string, b: string): number {
+  const len = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < len && a[i] === b[i]) {
+    i += 1;
+  }
+  return i;
+}
+
+function stripHtmlTags(value: string): string {
+  return value.replace(/<[^>]*>/g, "");
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)));
+}
+
+async function fetchYahooJapanQuotePage(symbol: string): Promise<{
+  sector: string | null;
+  dividendYield: number | null;
+  currentPrice: number | null;
+} | null> {
   try {
     const url = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}`;
 
@@ -350,13 +720,7 @@ async function fetchFromYahooJapanPage(
       return null;
     }
 
-    return {
-      sector: parsed.sector,
-      dividendYield: parsed.dividendYield,
-      currentPrice: parsed.currentPrice,
-      yahooSymbol: symbol,
-      googleSymbol,
-    };
+    return parsed;
   } catch {
     return null;
   }
@@ -368,22 +732,34 @@ export function parseYahooJapanHtml(html: string): {
   currentPrice: number | null;
 } | null {
   const state = extractPreloadedState(html);
+  const plainText = htmlToPlainText(html);
+
+  const supplementalSector = extractSectorFromHtml(html, plainText);
+  const supplementalDividendYield = extractDividendYieldFromHtml(html, plainText);
+  const supplementalCurrentPrice = extractCurrentPriceFromHtml(html, plainText);
+
   if (state) {
     const sectorRaw = state.mainStocksPriceBoard?.priceBoard?.industry?.industryName;
-    const sector = typeof sectorRaw === "string" && sectorRaw.trim().length > 0
-      ? sectorRaw.trim()
-      : null;
+    const sectorFromState =
+      typeof sectorRaw === "string" && sectorRaw.trim().length > 0 ? sectorRaw.trim() : null;
+    const sector = sectorFromState ?? supplementalSector;
 
     const dividendRaw =
       state.mainStocksPriceBoard?.priceBoard?.shareDividendYield ??
       state.mainStocksDetail?.referenceIndex?.shareDividendYield;
 
-    const dividendPercent = toFiniteNumber(dividendRaw);
-    const dividendYield =
-      dividendPercent !== null && dividendPercent >= 0 ? dividendPercent / 100 : null;
+    const dividendPercentFromState = toFiniteNumber(dividendRaw);
+    const dividendYieldFromState =
+      dividendPercentFromState !== null && dividendPercentFromState >= 0
+        ? normalizeDividendPercent(dividendPercentFromState)
+        : null;
+    const dividendYield = dividendYieldFromState ?? supplementalDividendYield;
 
-    const currentPriceRaw = state.mainStocksPriceBoard?.priceBoard?.price;
-    const currentPrice = toFiniteNumber(currentPriceRaw);
+    const currentPriceRaw =
+      state.mainStocksPriceBoard?.priceBoard?.price ??
+      state.mainFundPriceBoard?.fundPrices?.price;
+    const currentPriceFromState = toFiniteNumber(currentPriceRaw);
+    const currentPrice = currentPriceFromState ?? supplementalCurrentPrice;
 
     if (sector !== null || dividendYield !== null || currentPrice !== null) {
       return {
@@ -396,24 +772,31 @@ export function parseYahooJapanHtml(html: string): {
 
   // フォールバック: 埋め込みJSONの構造変更時でも最低限抽出する
   const sectorMatch = html.match(/"industryName"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
-  const sector = sectorMatch?.[1] ? decodeJsonString(sectorMatch[1]).trim() || null : null;
+  const sectorFromFallback =
+    sectorMatch?.[1] ? decodeJsonString(sectorMatch[1]).trim() || null : null;
+  const sector = sectorFromFallback ?? supplementalSector;
 
   const dividendMatch = html.match(
     /"shareDividendYield"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/
   );
   const dividendRaw = dividendMatch?.[1] ?? dividendMatch?.[2] ?? null;
   const dividendPercent = toFiniteNumber(dividendRaw);
-  const dividendYield =
-    dividendPercent !== null && dividendPercent >= 0 ? dividendPercent / 100 : null;
+  const dividendYieldFromFallback =
+    dividendPercent !== null && dividendPercent >= 0 ? normalizeDividendPercent(dividendPercent) : null;
+  const dividendYield = dividendYieldFromFallback ?? supplementalDividendYield;
 
   const contextualPriceMatch = html.match(
-    /"mainStocksPriceBoard"[\s\S]*?"priceBoard"[\s\S]*?"price"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/
+    /"mainStocksPriceBoard"[\s\S]*?"priceBoard"[\s\S]*?"price"\s*:\s*(?:"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?(?:\s*(?:円|JPY))?)"|([0-9]+(?:\.[0-9]+)?))/
+  );
+  const fundContextualPriceMatch = html.match(
+    /"mainFundPriceBoard"[\s\S]*?"fundPrices"[\s\S]*?"price"\s*:\s*(?:"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?(?:\s*(?:円|JPY))?)"|([0-9]+(?:\.[0-9]+)?))/
   );
   const priceMatch =
     contextualPriceMatch ??
-    html.match(/"price"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/);
+    fundContextualPriceMatch;
   const currentPriceRaw = priceMatch?.[1] ?? priceMatch?.[2] ?? null;
-  const currentPrice = toFiniteNumber(currentPriceRaw);
+  const currentPriceFromFallback = toFiniteNumber(currentPriceRaw);
+  const currentPrice = currentPriceFromFallback ?? supplementalCurrentPrice;
 
   if (sector === null && dividendYield === null && currentPrice === null) {
     return null;
@@ -424,6 +807,88 @@ export function parseYahooJapanHtml(html: string): {
     dividendYield,
     currentPrice,
   };
+}
+
+function extractSectorFromHtml(html: string, plainText: string): string | null {
+  const jsonMatch = html.match(
+    /"(?:categoryName|assetTypeName|fundTypeName|industryName)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/
+  );
+  if (jsonMatch?.[1]) {
+    const decoded = decodeJsonString(jsonMatch[1]).trim();
+    if (decoded.length > 0) {
+      return decoded;
+    }
+  }
+
+  const textMatch = plainText.match(/(?:分類|カテゴリ|アセットクラス)\s*[:：]?\s*([^\s]{2,30})/u);
+  return textMatch?.[1] ?? null;
+}
+
+function extractDividendYieldFromHtml(html: string, plainText: string): number | null {
+  const fromJson = extractNumberByPatterns(html, [
+    /"(?:shareDividendYield|distributionYield|yieldRate|dividendYield)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/,
+  ]);
+  if (fromJson !== null && fromJson >= 0) {
+    return normalizeDividendPercent(fromJson);
+  }
+
+  const textMatch = plainText.match(
+    /(?:分配金利回り|利回り|配当利回り)\s*[:：]?\s*([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*[%％]/u
+  );
+  const fromText = toFiniteNumber(textMatch?.[1] ?? null);
+  if (fromText !== null && fromText >= 0) {
+    return normalizeDividendPercent(fromText);
+  }
+
+  return null;
+}
+
+function extractCurrentPriceFromHtml(html: string, plainText: string): number | null {
+  const fromJson = extractNumberByPatterns(html, [
+    /"(?:standardPrice|basePrice|priceValue|regularMarketPrice|currentPrice)"\s*:\s*(?:"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?(?:\s*(?:円|JPY))?)"|([0-9]+(?:\.[0-9]+)?))/,
+    /"price"\s*:\s*\{\s*"raw"\s*:\s*([0-9]+(?:\.[0-9]+)?)/,
+  ]);
+  if (fromJson !== null) {
+    return fromJson;
+  }
+
+  const textPattern =
+    /(?:基準価額|現在値)\s*[:：]?\s*([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*(?:円|JPY)?/u;
+  const textPatternReverse =
+    /([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*(?:円|JPY)\s*(?:基準価額|現在値)/u;
+  const fromText = toFiniteNumber(
+    textPattern.exec(plainText)?.[1] ?? textPatternReverse.exec(plainText)?.[1] ?? null
+  );
+  return fromText;
+}
+
+function extractNumberByPatterns(html: string, patterns: RegExp[]): number | null {
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (!match) {
+      continue;
+    }
+    const raw = match[1] ?? match[2] ?? null;
+    const value = toFiniteNumber(raw);
+    if (value !== null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function normalizeDividendPercent(value: number): number {
+  // 3.2 -> 0.032, 0.032 -> 0.032 の両方を許容する
+  return value > 1 ? value / 100 : value;
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function extractPreloadedState(html: string): YahooPreloadedState | null {
@@ -446,14 +911,17 @@ function toFiniteNumber(value: unknown): number | null {
 
   if (typeof value === "string") {
     const normalized = value
-      .replace(/,/g, "")
+      .normalize("NFKC")
+      .replace(/[,]/g, "")
       .replace(/[％%]/g, "")
+      .replace(/[円¥]/g, "")
+      .replace(/\s+/g, "")
       .trim();
     if (!normalized) return null;
 
-    const parsed = Number(normalized);
-    if (Number.isFinite(parsed)) {
-      return parsed;
+    const direct = Number(normalized);
+    if (Number.isFinite(direct)) {
+      return direct;
     }
   }
 
@@ -481,8 +949,152 @@ function cacheKey(input: MarketDataInput): string {
   return marketDataInputKey(input);
 }
 
+function buildMemoryCacheKey(input: MarketDataInput): string {
+  return `input:${marketDataInputKey(input)}`;
+}
+
+function getMutualFundSymbolOverride(name: string | undefined): string | null {
+  const normalizedName = normalizeMutualFundLookupKey(name ?? "");
+  if (!normalizedName) {
+    return null;
+  }
+  return MUTUAL_FUND_SYMBOL_OVERRIDES_BY_NAME[normalizedName] ?? null;
+}
+
+function isPseudoMutualFundTicker(rawTicker: string): boolean {
+  const raw = rawTicker.trim().toUpperCase();
+  return raw.startsWith("FUND-") || raw.startsWith("SBI-") || raw.startsWith("EMAXIS-");
+}
+
+function isLikelyMutualFundCode(rawTicker: string): boolean {
+  const normalized = rawTicker.trim().toUpperCase();
+  if (!normalized) {
+    return false;
+  }
+  return /^\d{6,8}[A-Z]?$/.test(normalized);
+}
+
+function hasNonAscii(value: string): boolean {
+  return /[^\u0020-\u007E]/u.test(value);
+}
+
+function normalizeExtractedYahooSymbol(rawSymbol: string | null | undefined): string | null {
+  if (!rawSymbol) {
+    return null;
+  }
+
+  let decoded = rawSymbol.trim();
+  if (!decoded) {
+    return null;
+  }
+
+  try {
+    decoded = decodeURIComponent(decoded);
+  } catch {
+    // decode失敗時は生値を利用
+  }
+
+  const stripped = decoded
+    .replace(/^https?:\/\/finance\.yahoo\.co\.jp\/quote\//i, "")
+    .split(/[/?#]/)[0]
+    ?.trim();
+
+  if (!stripped || /\s/u.test(stripped)) {
+    return null;
+  }
+
+  return stripped.toUpperCase();
+}
+
+function normalizeMutualFundLookupKey(value: string): string {
+  return value.normalize("NFKC").replace(/[　\s]/g, "").trim().toUpperCase();
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function logMarketDataDebug(scope: string, error: unknown): void {
+  if (process.env.MARKET_DATA_DEBUG !== "1") {
+    return;
+  }
+  console.error(`[market-data:${scope}]`, error);
+}
+
+async function getPersistedYahooSymbol(input: MarketDataInput): Promise<string | null> {
+  try {
+    const [{ getDb }, { marketSymbolCache: marketSymbolCacheTable }] = await Promise.all([
+      import("@/infrastructure/database/connection"),
+      import("@/infrastructure/database/schema"),
+    ]);
+
+    const db = getDb();
+    const id = cacheKey(input);
+    const rows = await db
+      .select({
+        yahooSymbol: marketSymbolCacheTable.yahooSymbol,
+      })
+      .from(marketSymbolCacheTable)
+      .where(eq(marketSymbolCacheTable.id, id))
+      .limit(1);
+
+    const rawSymbol = rows[0]?.yahooSymbol;
+    if (!rawSymbol) {
+      return null;
+    }
+
+    const normalized = normalizeExtractedYahooSymbol(rawSymbol);
+    return normalized;
+  } catch (error) {
+    logMarketDataDebug("getPersistedYahooSymbol", error);
+    return null;
+  }
+}
+
+async function savePersistedYahooSymbol(
+  input: MarketDataInput,
+  yahooSymbol: string,
+): Promise<void> {
+  try {
+    const [{ getDb }, { marketSymbolCache: marketSymbolCacheTable }] = await Promise.all([
+      import("@/infrastructure/database/connection"),
+      import("@/infrastructure/database/schema"),
+    ]);
+
+    const db = getDb();
+    const id = cacheKey(input);
+    const normalized = normalizeExtractedYahooSymbol(yahooSymbol);
+    if (!normalized) {
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    await db
+      .insert(marketSymbolCacheTable)
+      .values({
+        id,
+        ticker: input.ticker,
+        name: input.name ?? null,
+        currency: input.currency,
+        securityType: input.securityType,
+        yahooSymbol: normalized,
+        resolvedAt: nowIso,
+        updatedAt: nowIso,
+      })
+      .onConflictDoUpdate({
+        target: marketSymbolCacheTable.id,
+        set: {
+          name: input.name ?? null,
+          yahooSymbol: normalized,
+          resolvedAt: nowIso,
+          updatedAt: nowIso,
+        },
+      });
+  } catch (error) {
+    logMarketDataDebug("savePersistedYahooSymbol", error);
+    // 恒久キャッシュ保存失敗時は本処理を継続
+  }
 }
 
 async function getPersistedMarketDataForToday(
@@ -507,6 +1119,10 @@ async function getPersistedMarketDataForToday(
     if (rows.length === 0) return { hit: false, data: null };
     const row = rows[0];
     if (row.fetchedDate !== todayJst) return { hit: false, data: null };
+    const cachedCurrentPrice =
+      typeof row.currentPrice === "number" && Number.isFinite(row.currentPrice)
+        ? row.currentPrice
+        : null;
 
     // 同日取得済み（失敗キャッシュ含む）
     if (!row.yahooSymbol) {
@@ -518,20 +1134,10 @@ async function getPersistedMarketDataForToday(
       return { hit: false, data: null };
     }
 
-    // セクター・配当利回りとも空の場合、scraping/autoでは再取得対象にする
-    if (row.sector == null && row.dividendYield == null) {
-      if (mode === "api") {
-        return {
-          hit: true,
-          data: {
-            sector: row.sector,
-            dividendYield: row.dividendYield,
-            currentPrice: null,
-            yahooSymbol: row.yahooSymbol,
-            googleSymbol: row.googleSymbol,
-          },
-        };
-      }
+    // 価格が空の旧キャッシュ行や、投資信託で1円誤検出された値は再取得を優先する
+    const isClearlyInvalidMutualFundPrice =
+      input.securityType === "mutualFund" && cachedCurrentPrice !== null && cachedCurrentPrice <= 1;
+    if (cachedCurrentPrice == null || isClearlyInvalidMutualFundPrice) {
       return { hit: false, data: null };
     }
 
@@ -540,22 +1146,23 @@ async function getPersistedMarketDataForToday(
       data: {
         sector: row.sector,
         dividendYield: row.dividendYield,
-        currentPrice: null,
+        currentPrice: cachedCurrentPrice,
         yahooSymbol: row.yahooSymbol,
         googleSymbol: row.googleSymbol,
       },
     };
-  } catch {
+  } catch (error) {
+    logMarketDataDebug("getPersistedMarketDataForToday", error);
     return { hit: false, data: null };
   }
 }
 
 async function savePersistedMarketData(
   input: MarketDataInput,
-  yahooSymbol: string,
   googleSymbol: string,
   todayJst: string,
   data: YahooMarketData | null,
+  resolvedSymbol: string | null,
 ): Promise<void> {
   try {
     const [{ getDb }, { marketDataCache: marketDataCacheTable }] = await Promise.all([
@@ -573,25 +1180,28 @@ async function savePersistedMarketData(
         ticker: input.ticker,
         currency: input.currency,
         securityType: input.securityType,
-        yahooSymbol: data?.yahooSymbol ?? null,
+        yahooSymbol: data?.yahooSymbol ?? resolvedSymbol ?? null,
         googleSymbol,
         sector: data?.sector ?? null,
         dividendYield: data?.dividendYield ?? null,
+        currentPrice: data?.currentPrice ?? null,
         fetchedDate: todayJst,
         fetchedAt: new Date().toISOString(),
       })
       .onConflictDoUpdate({
         target: marketDataCacheTable.id,
         set: {
-          yahooSymbol: data?.yahooSymbol ?? null,
+          yahooSymbol: data?.yahooSymbol ?? resolvedSymbol ?? null,
           googleSymbol,
           sector: data?.sector ?? null,
           dividendYield: data?.dividendYield ?? null,
+          currentPrice: data?.currentPrice ?? null,
           fetchedDate: todayJst,
           fetchedAt: new Date().toISOString(),
         },
       });
-  } catch {
+  } catch (error) {
+    logMarketDataDebug("savePersistedMarketData", error);
     // キャッシュ保存失敗時は無視（本処理は継続）
   }
 }
