@@ -91,7 +91,7 @@ export function normalizeYahooSymbol(input: MarketDataInput): string | null {
 export function toGoogleFinanceSymbol(input: MarketDataInput): string {
   const raw = input.ticker.trim();
   if (input.currency === "JPY" && /^\d{4,5}$/.test(raw)) {
-    return `TYO:${raw}`;
+    return `${raw}:TYO`;
   }
   return raw.toUpperCase();
 }

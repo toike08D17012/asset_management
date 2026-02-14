@@ -352,7 +352,18 @@ export function HoldingsTable({
                     );
                   case "dividends": return <span className="text-sm text-foreground">{dividendAmountDisplay}</span>;
                   case "yahooLink": return <a href={`https://finance.yahoo.com/quote/${h.yahooSymbol ?? h.security.ticker}`} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80 text-sm hover:underline">Yahoo</a>;
-                  case "googleLink": return <a href={`https://www.google.com/finance/quote/${h.googleSymbol ?? h.security.ticker}`} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80 text-sm hover:underline">Google</a>;
+                  case "googleLink": {
+                    const symbol = h.googleSymbol ?? h.security.ticker;
+                    let finalSymbol = symbol;
+                    if (h.security.currency === "JPY") {
+                      if (/^\d{4,5}$/.test(symbol)) {
+                        finalSymbol = `${symbol}:TYO`;
+                      } else if (symbol.startsWith("TYO:")) {
+                        finalSymbol = `${symbol.replace("TYO:", "")}:TYO`;
+                      }
+                    }
+                    return <a href={`https://www.google.com/finance/quote/${finalSymbol}`} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80 text-sm hover:underline">Google</a>;
+                  }
                   default: return null;
                 }
               };

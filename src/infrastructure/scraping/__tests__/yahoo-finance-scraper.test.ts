@@ -48,7 +48,7 @@ describe("yahoo-finance-scraper", () => {
       securityType: "stock",
     });
 
-    expect(jp).toBe("TYO:8306");
+    expect(jp).toBe("8306:TYO");
     expect(us).toBe("MSFT");
   });
 
