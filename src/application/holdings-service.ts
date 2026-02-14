@@ -4,22 +4,18 @@
 // ============================================================
 
 import {
-  type AccountId,
   type Result,
-  createHoldingId,
   createAccountId,
   ok,
   err,
 } from "@/domain/types";
 import type { Holding, AggregatedHolding } from "@/domain/entities/holding";
 import { createHolding } from "@/domain/entities/holding";
-import type { RawHolding } from "@/infrastructure/adapters/brokerage-adapter";
 import type { IHoldingRepository, IAccountRepository } from "@/domain/repositories";
 import { getBrokerageAdapterFactory } from "@/infrastructure/adapters/brokerage-factory";
 import { calculateWeightedAveragePrice } from "@/domain/services/weighted-average-calculator";
 import { getEventBus } from "@/infrastructure/event-bus";
 import type { HoldingsFetchedEvent, HoldingsAggregatedEvent } from "@/infrastructure/event-bus";
-import { toErrorMessage } from "@/lib/errors";
 import { getMutualFundDivisor } from "@/lib/format";
 import { v4 as uuidv4 } from "uuid";
 
@@ -55,7 +51,8 @@ export class HoldingsService {
     if (!parseResult.ok) return parseResult;
 
     // Delete existing holdings for this account
-    await this.holdingRepo.deleteByAccountId(account.id);
+    const deleteResult = await this.holdingRepo.deleteByAccountId(account.id);
+    if (!deleteResult.ok) return deleteResult;
 
     // Convert raw holdings to domain entities
     const holdings: Holding[] = [];
@@ -92,7 +89,8 @@ export class HoldingsService {
     if (!saveResult.ok) return saveResult;
 
     // Update account sync timestamp
-    await this.accountRepo.updateLastSyncedAt(account.id);
+    const syncResult = await this.accountRepo.updateLastSyncedAt(account.id);
+    if (!syncResult.ok) return syncResult;
 
     // Publish event
     const eventBus = getEventBus();
@@ -131,11 +129,13 @@ export class HoldingsService {
     const holdingsByTicker = new Map<string, Holding[]>();
 
     for (const holding of allResult.value) {
-      const key = `${holding.security.ticker}:${holding.security.currency}`;
-      if (!holdingsByTicker.has(key)) {
-        holdingsByTicker.set(key, []);
+      const key = `${holding.security.ticker}:${holding.security.currency}:${holding.security.type}`;
+      const existing = holdingsByTicker.get(key);
+      if (existing) {
+        existing.push(holding);
+      } else {
+        holdingsByTicker.set(key, [holding]);
       }
-      holdingsByTicker.get(key)!.push(holding);
     }
 
     const aggregated: AggregatedHolding[] = [];

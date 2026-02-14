@@ -10,6 +10,13 @@ import type { Result } from "@/domain/types";
 
 type ApiHandler = () => Promise<NextResponse>;
 
+function withNoStore(response: NextResponse): NextResponse {
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("Expires", "0");
+  return response;
+}
+
 /**
  * APIルートハンドラーのラッパー
  * - ensureInitialized() の呼び出し
@@ -23,16 +30,17 @@ export function withApiHandler(
   return (async () => {
     try {
       ensureInitialized();
-      return await handler();
+      const response = await handler();
+      return withNoStore(response);
     } catch (error) {
-      return NextResponse.json(
+      return withNoStore(NextResponse.json(
         {
           error: errorPrefix
             ? `${errorPrefix}: ${toErrorMessage(error)}`
             : toErrorMessage(error),
         },
         { status: 500 }
-      );
+      ));
     }
   })();
 }
@@ -49,12 +57,12 @@ export function resultToResponse<T>(
 ): NextResponse {
   if (!result.ok) {
     const status = isUnlockRequiredError(result.error.message) ? 401 : 500;
-    return NextResponse.json({ error: result.error.message }, { status });
+    return withNoStore(NextResponse.json({ error: result.error.message }, { status }));
   }
 
   const body = options?.wrapKey
     ? { [options.wrapKey]: result.value }
     : result.value;
 
-  return NextResponse.json(body, { status: options?.status ?? 200 });
+  return withNoStore(NextResponse.json(body, { status: options?.status ?? 200 }));
 }

@@ -8,9 +8,30 @@ const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
+const AUTH_TAG_LENGTH = 16;
+const MAX_ENCRYPTED_PAYLOAD_BYTES = 4_096;
+const MAX_PASSPHRASE_LENGTH = 512;
+const DEFAULT_DEV_SESSION_SECRET = "dev-session-secret-change-me";
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+
+function resolveSessionSecret(): string | null {
+  const configured = process.env.SESSION_SECRET?.trim();
+  if (configured && configured !== DEFAULT_DEV_SESSION_SECRET) {
+    return configured;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+
+  return configured || DEFAULT_DEV_SESSION_SECRET;
+}
 
 function getSessionKey(): Buffer {
-  const secret = process.env.SESSION_SECRET || "dev-session-secret-change-me";
+  const secret = resolveSessionSecret();
+  if (!secret) {
+    throw new Error("SESSION_SECRET must be configured in production.");
+  }
   return createHash("sha256").update(secret).digest();
 }
 
@@ -32,9 +53,14 @@ function fromBase64Url(input: string): Buffer {
  * Create a new session
  */
 export function createSession(passphrase: string): string {
+  if (!passphrase || passphrase.length > MAX_PASSPHRASE_LENGTH) {
+    throw new Error("Invalid passphrase length for session.");
+  }
+
   const now = Date.now();
   const payload = JSON.stringify({
     passphrase,
+    issuedAt: now,
     expiresAt: now + SESSION_DURATION,
   });
 
@@ -52,9 +78,15 @@ export function createSession(passphrase: string): string {
  */
 export function validateSession(token: string | null | undefined): string | null {
   if (!token) return null;
+  if (token.length > 8_192) return null;
 
   try {
-    const [ivPart, encryptedPart, tagPart] = token.split(".");
+    const parts = token.split(".");
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    const [ivPart, encryptedPart, tagPart] = parts;
     if (!ivPart || !encryptedPart || !tagPart) {
       return null;
     }
@@ -62,6 +94,12 @@ export function validateSession(token: string | null | undefined): string | null
     const iv = fromBase64Url(ivPart);
     const encrypted = fromBase64Url(encryptedPart);
     const authTag = fromBase64Url(tagPart);
+    if (iv.byteLength !== IV_LENGTH || authTag.byteLength !== AUTH_TAG_LENGTH) {
+      return null;
+    }
+    if (encrypted.byteLength === 0 || encrypted.byteLength > MAX_ENCRYPTED_PAYLOAD_BYTES) {
+      return null;
+    }
 
     const key = getSessionKey();
     const decipher = createDecipheriv(ALGORITHM, key, iv);
@@ -72,20 +110,34 @@ export function validateSession(token: string | null | undefined): string | null
       decipher.final(),
     ]).toString("utf8");
 
-    const payload = JSON.parse(decrypted) as {
-      passphrase: string;
-      expiresAt: number;
-    };
+    const payload = JSON.parse(decrypted) as unknown;
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    const passphrase = (payload as { passphrase?: unknown }).passphrase;
+    const issuedAt = (payload as { issuedAt?: unknown }).issuedAt;
+    const expiresAt = (payload as { expiresAt?: unknown }).expiresAt;
 
-    if (!payload.passphrase || typeof payload.passphrase !== "string") {
+    if (
+      typeof passphrase !== "string" ||
+      passphrase.length === 0 ||
+      passphrase.length > MAX_PASSPHRASE_LENGTH
+    ) {
+      return null;
+    }
+    if (typeof issuedAt !== "number" || !Number.isFinite(issuedAt)) return null;
+    if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
+    if (issuedAt > expiresAt) return null;
+
+    const now = Date.now();
+    if (issuedAt > now + CLOCK_SKEW_TOLERANCE_MS) {
+      return null;
+    }
+    if (now > expiresAt) {
       return null;
     }
 
-    if (Date.now() > payload.expiresAt) {
-      return null;
-    }
-
-    return payload.passphrase;
+    return passphrase;
   } catch {
     return null;
   }

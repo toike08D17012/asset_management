@@ -11,6 +11,22 @@ import {
 } from "@/lib/service-container";
 import { withApiHandler, resultToResponse } from "@/lib/api-handler";
 import { createSession } from "@/lib/session";
+import { parseJsonObject, readEnumField, readStringField } from "@/lib/request-validation";
+
+const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  maxAge: 60 * 60 * 24, // 24 hours
+  path: "/",
+};
+
+function createSessionResponse(passphrase: string, message: string): NextResponse {
+  const token = createSession(passphrase);
+  const response = NextResponse.json({ success: true, message });
+  response.cookies.set("session", token, SESSION_COOKIE_OPTIONS);
+  return response;
+}
 
 export function GET() {
   return withApiHandler(async () => {
@@ -22,38 +38,32 @@ export function GET() {
 
 export function POST(request: NextRequest) {
   return withApiHandler(async () => {
-    const body = await request.json();
-    const { passphrase, action } = body;
+    const bodyResult = await parseJsonObject(request, { maxChars: 8_192 });
+    if (!bodyResult.ok) return bodyResult.response;
 
-    if (!passphrase || typeof passphrase !== "string") {
-      return NextResponse.json(
-        { error: "パスフレーズは必須です" },
-        { status: 400 }
-      );
-    }
+    const passphraseResult = readStringField(bodyResult.data, "passphrase", {
+      required: true,
+      trim: false,
+      minLength: 8,
+      maxLength: 256,
+      label: "パスフレーズ",
+    });
+    if (!passphraseResult.ok) return passphraseResult.response;
 
-    if (passphrase.length < 8) {
-      return NextResponse.json(
-        { error: "パスフレーズは8文字以上で入力してください" },
-        { status: 400 }
-      );
-    }
+    const actionResult = readEnumField(bodyResult.data, "action", ["setup", "unlock"] as const, {
+      required: false,
+      label: "action",
+    });
+    if (!actionResult.ok) return actionResult.response;
+
+    const passphrase = passphraseResult.value!;
+    const action = actionResult.value;
 
     if (action === "unlock") {
       const result = unlockWithPassphrase(passphrase);
       if (!result.ok) return resultToResponse(result);
-      
-      // Create session from user passphrase
-      const token = createSession(passphrase);
-      const response = NextResponse.json({ success: true, message: "アンロックしました" });
-      response.cookies.set("session", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24, // 24 hours
-        path: "/",
-      });
-      return response;
+
+      return createSessionResponse(passphrase, "アンロックしました");
     }
 
     // Default: setup
@@ -61,39 +71,13 @@ export function POST(request: NextRequest) {
       // Already set up, try to unlock
       const result = unlockWithPassphrase(passphrase);
       if (!result.ok) return resultToResponse(result);
-      
-      // Create session from user passphrase
-      const token = createSession(passphrase);
-      const response = NextResponse.json({
-        success: true,
-        message: "アンロックしました",
-      });
-      response.cookies.set("session", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24, // 24 hours
-        path: "/",
-      });
-      return response;
+
+      return createSessionResponse(passphrase, "アンロックしました");
     }
 
     const result = setupEncryption(passphrase);
     if (!result.ok) return resultToResponse(result);
 
-    // Create session from user passphrase
-    const token = createSession(passphrase);
-    const response = NextResponse.json({
-      success: true,
-      message: "セットアップが完了しました",
-    });
-    response.cookies.set("session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24, // 24 hours
-      path: "/",
-    });
-    return response;
+    return createSessionResponse(passphrase, "セットアップが完了しました");
   }, "セットアップに失敗しました");
 }
