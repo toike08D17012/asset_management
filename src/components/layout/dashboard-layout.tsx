@@ -15,7 +15,9 @@ export function DashboardLayout({ children, sidebar }: DashboardLayoutProps) {
       <main className="flex-1 flex flex-col min-w-0 bg-background/50">
         <div className="md:hidden border-b p-4 flex items-center justify-between bg-card">
            <div className="font-bold">Asset Manager</div>
-           {/* Mobile menu trigger could go here */}
+        </div>
+        <div className="md:hidden border-b border-border bg-card/70 p-2">
+          {sidebar}
         </div>
         <div className="flex-1 p-4 md:p-8 overflow-auto">
           {children}

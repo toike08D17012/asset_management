@@ -43,7 +43,9 @@ export function DashboardNav({ activeTab, onTabChange }: DashboardNavProps) {
       {items.map((item) => (
         <button
           key={item.id}
+          type="button"
           onClick={() => onTabChange(item.id)}
+          aria-current={activeTab === item.id ? "page" : undefined}
           className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
             activeTab === item.id
               ? "bg-primary text-primary-foreground"

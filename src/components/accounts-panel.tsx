@@ -19,11 +19,13 @@ export function AccountsPanel({
     password: "",
   });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleAddAccount(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setNotice("");
     setLoading(true);
 
     try {
@@ -49,7 +51,7 @@ export function AccountsPanel({
           if (typeof window !== "undefined") {
             sessionStorage.removeItem("encryptionUnlocked");
           }
-          alert("セッションが切れました。再度ログインしてください。");
+          setError("セッションが切れました。再度ログインしてください。");
           window.location.reload();
           return;
         }
@@ -64,6 +66,7 @@ export function AccountsPanel({
         username: "",
         password: "",
       });
+      setNotice("口座を追加しました");
       onRefresh();
     } catch (error) {
       console.error("Account creation error:", error);
@@ -74,42 +77,54 @@ export function AccountsPanel({
   }
 
   async function handleDeleteAccount(id: string) {
+    setError("");
+    setNotice("");
     if (!confirm("このアカウントを削除しますか？関連する保有証券データも削除されます。")) {
       return;
     }
 
     try {
       const res = await fetch(`/api/accounts/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        onRefresh();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? "削除に失敗しました");
+        return;
       }
+      setNotice("口座を削除しました");
+      onRefresh();
     } catch {
-      alert("削除に失敗しました");
+      setError("削除に失敗しました");
     }
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">証券口座一覧</h2>
+        <h2 className="text-lg font-semibold text-foreground">証券口座一覧</h2>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition"
+          className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg transition hover:opacity-90"
         >
           {showForm ? "キャンセル" : "+ 口座を追加"}
         </button>
       </div>
 
+      {notice && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {notice}
+        </div>
+      )}
+
       {/* Add Account Form */}
       {showForm && (
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-md font-semibold text-slate-900 mb-4">
+        <div className="bg-card rounded-xl border border-border shadow-sm p-6">
+          <h3 className="text-md font-semibold text-foreground mb-4">
             新しい証券口座を追加
           </h3>
           <form onSubmit={handleAddAccount} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   口座名
                 </label>
                 <input
@@ -118,13 +133,13 @@ export function AccountsPanel({
                   onChange={(e) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full px-4 py-2 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
                   placeholder="例: 楽天証券 メイン口座"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   証券会社
                 </label>
                 <select
@@ -132,7 +147,7 @@ export function AccountsPanel({
                   onChange={(e) =>
                     setFormData({ ...formData, brokerage: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full px-4 py-2 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
                 >
                   <option value={Brokerage.RAKUTEN}>
                     {brokerageDisplayName(Brokerage.RAKUTEN)}
@@ -143,7 +158,7 @@ export function AccountsPanel({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   ログインID
                 </label>
                 <input
@@ -152,12 +167,12 @@ export function AccountsPanel({
                   onChange={(e) =>
                     setFormData({ ...formData, username: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full px-4 py-2 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   パスワード
                 </label>
                 <input
@@ -166,14 +181,14 @@ export function AccountsPanel({
                   onChange={(e) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full px-4 py-2 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
                   required
                 />
               </div>
             </div>
 
             {error && (
-              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">
+              <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm">
                 {error}
               </div>
             )}
@@ -182,7 +197,7 @@ export function AccountsPanel({
               <button
                 type="submit"
                 disabled={loading}
-                className="px-6 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition disabled:opacity-50"
+                className="px-6 py-2 bg-primary text-primary-foreground font-medium rounded-lg transition hover:opacity-90 disabled:opacity-50"
               >
                 {loading ? "追加中..." : "追加"}
               </button>
@@ -193,11 +208,11 @@ export function AccountsPanel({
 
       {/* Account List */}
       {accounts.length === 0 ? (
-        <div className="bg-white rounded-xl shadow-sm p-8 text-center">
-          <p className="text-slate-500">
+        <div className="bg-card rounded-xl border border-border shadow-sm p-8 text-center">
+          <p className="text-muted-foreground">
             登録されている証券口座がありません
           </p>
-          <p className="text-sm text-slate-400 mt-2">
+          <p className="text-sm text-muted-foreground mt-2">
             「+ 口座を追加」から証券口座を登録してください
           </p>
         </div>
@@ -206,7 +221,7 @@ export function AccountsPanel({
           {accounts.map((account) => (
             <div
               key={account.id}
-              className="bg-white rounded-xl shadow-sm p-6"
+              className="bg-card rounded-xl border border-border shadow-sm p-6"
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
@@ -220,19 +235,17 @@ export function AccountsPanel({
                     {account.brokerage === "rakuten" ? "楽天" : "SBI"}
                   </div>
                   <div>
-                    <p className="font-medium text-slate-900">
+                    <p className="font-medium text-foreground">
                       {account.name}
                     </p>
-                    <p className="text-sm text-slate-500">
-                      {brokerageDisplayName(
-                        account.brokerage as "rakuten" | "sbi"
-                      )}
+                    <p className="text-sm text-muted-foreground">
+                      {brokerageDisplayName(account.brokerage)}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => handleDeleteAccount(account.id)}
-                  className="text-slate-400 hover:text-red-500 transition"
+                  className="text-muted-foreground hover:text-destructive transition"
                   title="削除"
                 >
                   <svg
@@ -250,7 +263,7 @@ export function AccountsPanel({
                   </svg>
                 </button>
               </div>
-              <div className="mt-4 text-xs text-slate-400">
+              <div className="mt-4 text-xs text-muted-foreground">
                 <p>
                   作成日:{" "}
                   {new Date(account.createdAt).toLocaleDateString("ja-JP")}

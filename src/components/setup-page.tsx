@@ -73,9 +73,9 @@ export function SetupPage({
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/40">
       <div className="w-full max-w-md mx-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-card rounded-2xl border border-border shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-primary-100 rounded-full mb-4">
               <svg
@@ -92,10 +92,10 @@ export function SetupPage({
                 />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">
+            <h1 className="text-2xl font-bold text-foreground">
               {isFirstTime ? "資産管理アプリ セットアップ" : "資産管理アプリ"}
             </h1>
-            <p className="text-slate-500 mt-2">
+            <p className="text-muted-foreground mt-2">
               {isFirstTime
                 ? "データを保護するパスフレーズを設定してください"
                 : "パスフレーズを入力してアンロックしてください"}
@@ -106,7 +106,7 @@ export function SetupPage({
             <div>
               <label
                 htmlFor="passphrase"
-                className="block text-sm font-medium text-slate-700 mb-1"
+                className="block text-sm font-medium text-foreground mb-1"
               >
                 パスフレーズ
               </label>
@@ -115,10 +115,11 @@ export function SetupPage({
                 type="password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition"
+                className="w-full px-4 py-3 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring transition"
                 placeholder="8文字以上のパスフレーズ"
                 required
                 minLength={8}
+                autoComplete={isFirstTime ? "new-password" : "current-password"}
               />
             </div>
 
@@ -126,7 +127,7 @@ export function SetupPage({
               <div>
                 <label
                   htmlFor="confirm"
-                  className="block text-sm font-medium text-slate-700 mb-1"
+                  className="block text-sm font-medium text-foreground mb-1"
                 >
                   パスフレーズ（確認）
                 </label>
@@ -135,16 +136,17 @@ export function SetupPage({
                   type="password"
                   value={confirmPassphrase}
                   onChange={(e) => setConfirmPassphrase(e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition"
+                  className="w-full px-4 py-3 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring transition"
                   placeholder="もう一度入力してください"
                   required
                   minLength={8}
+                  autoComplete="new-password"
                 />
               </div>
             )}
 
             {error && (
-              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">
+              <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm">
                 {error}
               </div>
             )}
@@ -152,7 +154,7 @@ export function SetupPage({
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 px-4 bg-primary text-primary-foreground font-medium rounded-lg transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading
                 ? "処理中..."
@@ -163,7 +165,7 @@ export function SetupPage({
           </form>
 
           {isFirstTime && (
-            <p className="text-xs text-slate-400 text-center mt-6">
+            <p className="text-xs text-muted-foreground text-center mt-6">
               このパスフレーズは証券口座の認証情報を暗号化するために使用されます。
               <br />
               忘れた場合、データを復元できません。

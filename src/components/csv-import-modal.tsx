@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Encoding from "encoding-japanese";
 import type { AccountSummary } from "@/types/api";
+
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 export function CSVImportModal({
   accounts,
@@ -22,9 +24,22 @@ export function CSVImportModal({
   const [loading, setLoading] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
 
+  useEffect(() => {
+    if (!selectedAccount && accounts.length > 0) {
+      setSelectedAccount(accounts[0].id);
+    }
+  }, [accounts, selectedAccount]);
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError("ファイルサイズが大きすぎます（2MB以下）");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -124,14 +139,14 @@ export function CSVImportModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold text-slate-900">
+      <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">
             CSVインポート
           </h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition"
+            className="text-muted-foreground hover:text-foreground transition"
           >
             <svg
               className="w-6 h-6"
@@ -157,13 +172,13 @@ export function CSVImportModal({
           ) : (
             <>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   インポート先の証券口座
                 </label>
                 <select
                   value={selectedAccount}
                   onChange={(e) => setSelectedAccount(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full px-4 py-2 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
                 >
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -174,51 +189,51 @@ export function CSVImportModal({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   CSVファイル
                 </label>
                 <input
                   type="file"
                   accept=".csv,.txt"
                   onChange={handleFileUpload}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+                  className="w-full px-4 py-2 border border-input bg-background rounded-lg text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-foreground mb-1">
                   または直接CSVデータを貼り付け
                 </label>
                 <textarea
                   value={csvContent}
                   onChange={(e) => setCSVContent(e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-mono text-sm"
+                  className="w-full px-4 py-3 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring font-mono text-sm"
                   rows={8}
                   placeholder="または、CSVファイルの内容を直接貼り付け"
                 />
               </div>
 
-              <div className="bg-slate-50 rounded-lg p-4">
-                <p className="text-sm font-medium text-slate-700 mb-2">
+              <div className="bg-muted/50 rounded-lg p-4 border border-border">
+                <p className="text-sm font-medium text-foreground mb-2">
                   楽天証券の場合
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted-foreground">
                   マイメニュー → 資産状況 → 保有資産一覧 → 「資産残高（合計）」のCSVダウンロード
                 </p>
-                <p className="text-xs text-slate-400 mt-2">
+                <p className="text-xs text-muted-foreground mt-2">
                   ※ ファイルは自動的にShift-JISから変換されます
                 </p>
               </div>
 
               {error && (
-                <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">
+                <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm">
                   {error}
                 </div>
               )}
 
               {success && (
-                <div className="bg-green-50 text-green-600 px-4 py-3 rounded-lg text-sm">
-                  ✅ {success}
+                <div className="bg-emerald-50 text-emerald-700 px-4 py-3 rounded-lg text-sm">
+                  {success}
                 </div>
               )}
 
@@ -227,22 +242,22 @@ export function CSVImportModal({
                   type="button"
                   onClick={handleClearData}
                   disabled={clearLoading}
-                  className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-destructive/10 text-destructive hover:bg-destructive/20 text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {clearLoading ? "削除中..." : "🗑️ 全データ削除"}
+                  {clearLoading ? "削除中..." : "全データ削除"}
                 </button>
                 <div className="flex-1" />
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 text-slate-600 hover:text-slate-800 text-sm font-medium"
+                  className="px-4 py-2 text-muted-foreground hover:text-foreground text-sm font-medium"
                 >
                   キャンセル
                 </button>
                 <button
                   type="submit"
                   disabled={loading || !csvContent.trim()}
-                  className="px-6 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-6 py-2 bg-primary text-primary-foreground font-medium rounded-lg transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? "インポート中..." : "インポート実行"}
                 </button>
