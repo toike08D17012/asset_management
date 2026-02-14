@@ -1,0 +1,113 @@
+"use client";
+
+import { useState } from "react";
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { DashboardNav, type DashboardTab } from "@/components/dashboard/dashboard-nav";
+import { Overview } from "@/components/dashboard/overview";
+import { AccountsPanel } from "@/components/accounts-panel";
+import { CSVImportModal } from "@/components/csv-import-modal";
+
+type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
+
+export function Dashboard() {
+  const {
+    portfolio,
+    holdings,
+    accounts,
+    loadingPortfolio,
+    loadingHoldings,
+    loadingAccounts,
+    refreshing,
+    refreshData,
+  } = useDashboardData();
+
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  const [showImport, setShowImport] = useState(false);
+  const [refreshingColumns, setRefreshingColumns] = useState<Set<MarketColumnId>>(new Set());
+
+  // Logic for partial refresh (copied from original dashboard but simplified)
+  const forceRefreshColumn = async (columnId: MarketColumnId) => {
+    if (refreshingColumns.has(columnId)) return;
+    setRefreshingColumns(prev => new Set(prev).add(columnId));
+    try {
+      await fetch(`/api/holdings?refreshColumn=${columnId}`);
+      await refreshData();
+    } catch (error) {
+       console.error(`Failed to refresh column ${columnId}:`, error);
+    } finally {
+      setRefreshingColumns(prev => {
+        const next = new Set(prev);
+        next.delete(columnId);
+        return next;
+      });
+    }
+  };
+
+  const forceRefreshAllMarketData = async () => {
+     try {
+       await fetch("/api/holdings?refreshAll=true");
+       await refreshData();
+     } catch (error) {
+       console.error("Failed to refresh all market data:", error);
+     }
+  };
+
+  const handleTabChange = (tab: DashboardTab) => {
+    if (tab === "import") {
+      setShowImport(true);
+    } else {
+      setActiveTab(tab);
+    }
+  };
+
+  return (
+    <DashboardLayout
+      sidebar={<DashboardNav activeTab={activeTab} onTabChange={handleTabChange} />}
+    >
+      <div className="space-y-6">
+        <header className="flex justify-between items-center pb-6 border-b border-border">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+            {activeTab === "overview" && "ダッシュボード"}
+            {activeTab === "accounts" && "口座管理"}
+          </h1>
+          <div className="text-sm text-muted-foreground">
+            {refreshing ? "更新中..." : "最終更新: " + new Date().toLocaleTimeString()}
+          </div>
+        </header>
+
+        {activeTab === "overview" && (
+          <Overview
+            portfolio={portfolio}
+            holdings={holdings}
+            loadingPortfolio={loadingPortfolio}
+            loadingHoldings={loadingHoldings}
+            refreshing={refreshing}
+            refreshingColumns={refreshingColumns}
+            onRefreshCol={forceRefreshColumn}
+            onRefreshAll={forceRefreshAllMarketData}
+            onImport={() => setShowImport(true)}
+          />
+        )}
+
+        {activeTab === "accounts" && (
+           <div className="space-y-4">
+             {loadingAccounts && accounts.length === 0 ? (
+               <div className="animate-pulse h-64 bg-muted rounded-xl" />
+             ) : (
+               <AccountsPanel accounts={accounts} onRefresh={refreshData} />
+             )}
+           </div>
+        )}
+      </div>
+
+      {showImport && (
+        <CSVImportModal
+          accounts={accounts}
+          onClose={() => setShowImport(false)}
+          onImportComplete={refreshData}
+        />
+      )}
+    </DashboardLayout>
+  );
+}
