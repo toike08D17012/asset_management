@@ -69,11 +69,57 @@ type YahooPreloadedState = {
   readonly mainFundPriceBoard?: {
     readonly fundPrices?: {
       readonly price?: number | string;
+      readonly distributionYield?: number | string;
+      readonly distributionRate?: number | string;
+      readonly annualDistributionYield?: number | string;
+      readonly yieldRate?: number | string;
+    };
+    readonly fundDetail?: {
+      readonly distributionYield?: number | string;
+      readonly distributionRate?: number | string;
+      readonly annualDistributionYield?: number | string;
+      readonly yieldRate?: number | string;
+    };
+  };
+  readonly mainFundDetail?: {
+    readonly items?: {
+      readonly settlementFrequency?: number | string;
+      readonly recentDividend?: number | string;
+    };
+  };
+  readonly mainFundReferenceInformation?: {
+    readonly referenceInformation?: {
+      readonly settlementAndDividend?: {
+        readonly settlementFrequency?: number | string;
+        readonly recentDividend?: number | string;
+        readonly dividendYield?: number | string;
+      };
     };
   };
   readonly mainStocksDetail?: {
     readonly referenceIndex?: {
       readonly shareDividendYield?: number | string;
+    };
+  };
+  readonly pageInfo?: {
+    readonly itemType?: string;
+    readonly jwtToken?: string;
+  };
+};
+
+type YahooFundReferenceInformationPayload = {
+  readonly settlementAndDividend?: {
+    readonly settlementFrequency?: number | string;
+    readonly settlementLatestDate?: string;
+    readonly recentDividend?: number | string;
+    readonly dividendYield?: number | string;
+  };
+  readonly referenceInformation?: {
+    readonly settlementAndDividend?: {
+      readonly settlementFrequency?: number | string;
+      readonly settlementLatestDate?: string;
+      readonly recentDividend?: number | string;
+      readonly dividendYield?: number | string;
     };
   };
 };
@@ -698,9 +744,9 @@ async function fetchYahooJapanQuotePage(symbol: string): Promise<{
   currentPrice: number | null;
 } | null> {
   try {
-    const url = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}`;
+    const quoteUrl = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}`;
 
-    const response = await fetch(url, {
+    const response = await fetch(quoteUrl, {
       headers: {
         "User-Agent": YAHOO_JP_USER_AGENT,
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -720,10 +766,77 @@ async function fetchYahooJapanQuotePage(symbol: string): Promise<{
       return null;
     }
 
-    return parsed;
+    const state = extractPreloadedState(html);
+    const isFundPage =
+      state?.pageInfo?.itemType === "fund" || state?.mainFundPriceBoard !== undefined;
+    if (!isFundPage) {
+      return parsed;
+    }
+
+    const jwtToken = state?.pageInfo?.jwtToken;
+    const dividendYieldFromReferenceApi =
+      jwtToken === undefined
+        ? null
+        : await fetchYahooJapanFundReferenceDividendYield(symbol, jwtToken, quoteUrl);
+
+    if (dividendYieldFromReferenceApi === null) {
+      return parsed;
+    }
+
+    return {
+      ...parsed,
+      dividendYield: dividendYieldFromReferenceApi,
+    };
   } catch {
     return null;
   }
+}
+
+async function fetchYahooJapanFundReferenceDividendYield(
+  symbol: string,
+  jwtToken: string,
+  quoteUrl: string,
+): Promise<number | null> {
+  const token = jwtToken.trim();
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const url = new URL("https://finance.yahoo.co.jp/bff-pc/v1/main/fund/reference/information");
+    url.searchParams.set("fundCode", symbol);
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": YAHOO_JP_USER_AGENT,
+        Accept: "application/json",
+        "jwt-token": token,
+        Referer: quoteUrl,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as YahooFundReferenceInformationPayload;
+    return parseYahooJapanFundReferenceInformationDividendYield(payload);
+  } catch {
+    return null;
+  }
+}
+
+export function parseYahooJapanFundReferenceInformationDividendYield(
+  payload: YahooFundReferenceInformationPayload | null | undefined,
+): number | null {
+  const settlementAndDividend =
+    payload?.settlementAndDividend ?? payload?.referenceInformation?.settlementAndDividend;
+  const dividendPercent = toFiniteNumber(settlementAndDividend?.dividendYield ?? null);
+  if (dividendPercent === null || dividendPercent < 0) {
+    return null;
+  }
+  return normalizeDividendPercent(dividendPercent);
 }
 
 export function parseYahooJapanHtml(html: string): {
@@ -744,22 +857,52 @@ export function parseYahooJapanHtml(html: string): {
       typeof sectorRaw === "string" && sectorRaw.trim().length > 0 ? sectorRaw.trim() : null;
     const sector = sectorFromState ?? supplementalSector;
 
+    const currentPriceRaw =
+      state.mainStocksPriceBoard?.priceBoard?.price ??
+      state.mainFundPriceBoard?.fundPrices?.price;
+    const currentPriceFromState = toFiniteNumber(currentPriceRaw);
+    const currentPrice = currentPriceFromState ?? supplementalCurrentPrice;
+
+    const settlementAndDividend =
+      state.mainFundReferenceInformation?.referenceInformation?.settlementAndDividend;
     const dividendRaw =
       state.mainStocksPriceBoard?.priceBoard?.shareDividendYield ??
-      state.mainStocksDetail?.referenceIndex?.shareDividendYield;
+      state.mainStocksDetail?.referenceIndex?.shareDividendYield ??
+      settlementAndDividend?.dividendYield ??
+      state.mainFundPriceBoard?.fundDetail?.distributionYield ??
+      state.mainFundPriceBoard?.fundDetail?.distributionRate ??
+      state.mainFundPriceBoard?.fundDetail?.annualDistributionYield ??
+      state.mainFundPriceBoard?.fundDetail?.yieldRate ??
+      state.mainFundPriceBoard?.fundPrices?.distributionYield ??
+      state.mainFundPriceBoard?.fundPrices?.distributionRate ??
+      state.mainFundPriceBoard?.fundPrices?.annualDistributionYield ??
+      state.mainFundPriceBoard?.fundPrices?.yieldRate;
 
     const dividendPercentFromState = toFiniteNumber(dividendRaw);
     const dividendYieldFromState =
       dividendPercentFromState !== null && dividendPercentFromState >= 0
         ? normalizeDividendPercent(dividendPercentFromState)
         : null;
-    const dividendYield = dividendYieldFromState ?? supplementalDividendYield;
-
-    const currentPriceRaw =
-      state.mainStocksPriceBoard?.priceBoard?.price ??
-      state.mainFundPriceBoard?.fundPrices?.price;
-    const currentPriceFromState = toFiniteNumber(currentPriceRaw);
-    const currentPrice = currentPriceFromState ?? supplementalCurrentPrice;
+    const recentDistribution = toFiniteNumber(
+      state.mainFundDetail?.items?.recentDividend ?? settlementAndDividend?.recentDividend
+    );
+    const settlementFrequency = toFiniteNumber(
+      state.mainFundDetail?.items?.settlementFrequency ?? settlementAndDividend?.settlementFrequency
+    );
+    const dividendYieldFromRecentDistribution = deriveDistributionYieldFromRecentDistribution(
+      recentDistribution,
+      settlementFrequency,
+      currentPrice
+    );
+    const derivedDistributionYield = extractDistributionYieldFromSummaryText(
+      plainText,
+      currentPrice
+    );
+    const dividendYield =
+      dividendYieldFromState ??
+      supplementalDividendYield ??
+      dividendYieldFromRecentDistribution ??
+      derivedDistributionYield;
 
     if (sector !== null || dividendYield !== null || currentPrice !== null) {
       return {
@@ -777,13 +920,12 @@ export function parseYahooJapanHtml(html: string): {
   const sector = sectorFromFallback ?? supplementalSector;
 
   const dividendMatch = html.match(
-    /"shareDividendYield"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/
+    /"(?:shareDividendYield|distributionYield|distributionRate|annualDistributionYield|yieldRate|dividendYield)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/
   );
   const dividendRaw = dividendMatch?.[1] ?? dividendMatch?.[2] ?? null;
   const dividendPercent = toFiniteNumber(dividendRaw);
   const dividendYieldFromFallback =
     dividendPercent !== null && dividendPercent >= 0 ? normalizeDividendPercent(dividendPercent) : null;
-  const dividendYield = dividendYieldFromFallback ?? supplementalDividendYield;
 
   const contextualPriceMatch = html.match(
     /"mainStocksPriceBoard"[\s\S]*?"priceBoard"[\s\S]*?"price"\s*:\s*(?:"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?(?:\s*(?:円|JPY))?)"|([0-9]+(?:\.[0-9]+)?))/
@@ -797,6 +939,12 @@ export function parseYahooJapanHtml(html: string): {
   const currentPriceRaw = priceMatch?.[1] ?? priceMatch?.[2] ?? null;
   const currentPriceFromFallback = toFiniteNumber(currentPriceRaw);
   const currentPrice = currentPriceFromFallback ?? supplementalCurrentPrice;
+  const derivedDistributionYield = extractDistributionYieldFromSummaryText(
+    plainText,
+    currentPrice
+  );
+  const dividendYield =
+    dividendYieldFromFallback ?? supplementalDividendYield ?? derivedDistributionYield;
 
   if (sector === null && dividendYield === null && currentPrice === null) {
     return null;
@@ -826,7 +974,7 @@ function extractSectorFromHtml(html: string, plainText: string): string | null {
 
 function extractDividendYieldFromHtml(html: string, plainText: string): number | null {
   const fromJson = extractNumberByPatterns(html, [
-    /"(?:shareDividendYield|distributionYield|yieldRate|dividendYield)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/,
+    /"(?:shareDividendYield|distributionYield|distributionRate|annualDistributionYield|yieldRate|dividendYield)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/,
   ]);
   if (fromJson !== null && fromJson >= 0) {
     return normalizeDividendPercent(fromJson);
@@ -841,6 +989,52 @@ function extractDividendYieldFromHtml(html: string, plainText: string): number |
   }
 
   return null;
+}
+
+function extractDistributionYieldFromSummaryText(
+  plainText: string,
+  currentPrice: number | null,
+): number | null {
+  const recentDistributionMatch = plainText.match(
+    /(?:直近分配金|分配金)[^0-9０-９]{0,20}([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*(?:円|JPY)?/u
+  );
+  const settlementFrequencyMatch = plainText.match(
+    /(?:決算頻度(?:\s*(?:（年）|\(年\)|年))?|年間決算回数)[^0-9０-９]{0,20}([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*回/u
+  );
+
+  const recentDistribution = toFiniteNumber(recentDistributionMatch?.[1] ?? null);
+  const settlementFrequency = toFiniteNumber(settlementFrequencyMatch?.[1] ?? null);
+  return deriveDistributionYieldFromRecentDistribution(
+    recentDistribution,
+    settlementFrequency,
+    currentPrice
+  );
+}
+
+function deriveDistributionYieldFromRecentDistribution(
+  recentDistribution: number | null,
+  settlementFrequency: number | null,
+  currentPrice: number | null,
+): number | null {
+  if (currentPrice === null || currentPrice <= 0) {
+    return null;
+  }
+
+  if (recentDistribution === null || settlementFrequency === null) {
+    return null;
+  }
+
+  if (recentDistribution < 0 || settlementFrequency <= 0) {
+    return null;
+  }
+
+  const annualDistribution = recentDistribution * settlementFrequency;
+  const distributionYield = annualDistribution / currentPrice;
+  if (!Number.isFinite(distributionYield) || distributionYield < 0) {
+    return null;
+  }
+
+  return distributionYield;
 }
 
 function extractCurrentPriceFromHtml(html: string, plainText: string): number | null {
@@ -892,7 +1086,7 @@ function htmlToPlainText(html: string): string {
 }
 
 export function extractPreloadedState(html: string): YahooPreloadedState | null {
-  const match = html.match(/window\.__PRELOADED_STATE__\s*=\s*(\{[\s\S]*?\})\s*;\s*<\/script>/);
+  const match = html.match(/window\.__PRELOADED_STATE__\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/);
   if (!match?.[1]) {
     return null;
   }

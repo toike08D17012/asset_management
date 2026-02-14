@@ -3,6 +3,8 @@ import {
   normalizeYahooSymbol,
   toGoogleFinanceSymbol,
   parseYahooJapanHtml,
+  extractPreloadedState,
+  parseYahooJapanFundReferenceInformationDividendYield,
   extractYahooSymbolsFromSearchHtml,
   rankYahooSymbolsByQueryFromSearchHtml,
 } from "@/infrastructure/scraping/yahoo-finance-scraper";
@@ -151,6 +153,22 @@ describe("yahoo-finance-scraper", () => {
     expect(parsed?.dividendYield).toBeCloseTo(0.0321, 6);
   });
 
+  it("投資信託ページで直近分配金と決算頻度から分配利回りを推定できる", () => {
+    const html = `
+      <html><body>
+        <div>基準価額 16,417円</div>
+        <div>決算頻度（年） 4回</div>
+        <div>直近分配金 140円</div>
+      </body></html>
+    `;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.currentPrice).toBe(16417);
+    expect(parsed?.dividendYield).toBeCloseTo((140 * 4) / 16417, 6);
+  });
+
   it("スクリプト構造が変わっても本文テキストから基準価額を抽出できる", () => {
     const html = `
       <html><body>
@@ -203,6 +221,77 @@ describe("yahoo-finance-scraper", () => {
 
     expect(parsed).not.toBeNull();
     expect(parsed?.currentPrice).toBe(33366);
+  });
+
+  it("PRELOADED_STATEは末尾セミコロンなしでも抽出できる", () => {
+    const html = `
+      <html><body>
+        <script>
+          window.__PRELOADED_STATE__ = {
+            "mainFundPriceBoard": {
+              "fundPrices": {
+                "price": "13,547"
+              }
+            }
+          }
+        </script>
+      </body></html>
+    `;
+
+    const state = extractPreloadedState(html);
+
+    expect(state).not.toBeNull();
+    expect(state?.mainFundPriceBoard?.fundPrices?.price).toBe("13,547");
+  });
+
+  it("投資信託のPRELOADED_STATEから直近分配金と決算頻度で分配利回りを算出できる", () => {
+    const html = `
+      <html><body>
+        <script>
+          window.__PRELOADED_STATE__ = {
+            "mainFundPriceBoard": {
+              "fundPrices": {
+                "price": "13,547"
+              }
+            },
+            "mainFundDetail": {
+              "items": {
+                "settlementFrequency": "4",
+                "recentDividend": "170"
+              }
+            }
+          }
+        </script>
+      </body></html>
+    `;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.currentPrice).toBe(13547);
+    expect(parsed?.dividendYield).toBeCloseTo((170 * 4) / 13547, 6);
+  });
+
+  it("投信参照情報APIの分配金利回りを正規化して取得できる", () => {
+    const normalized = parseYahooJapanFundReferenceInformationDividendYield({
+      settlementAndDividend: {
+        dividendYield: "4.79",
+      },
+    });
+
+    expect(normalized).toBeCloseTo(0.0479, 6);
+  });
+
+  it("投信参照情報APIのネスト形式でも分配金利回りを取得できる", () => {
+    const normalized = parseYahooJapanFundReferenceInformationDividendYield({
+      referenceInformation: {
+        settlementAndDividend: {
+          dividendYield: 5.01,
+        },
+      },
+    });
+
+    expect(normalized).toBeCloseTo(0.0501, 6);
   });
 
   it("数値以外の currentPrice 文字列を価格として誤抽出しない", () => {

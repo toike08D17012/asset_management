@@ -32,7 +32,7 @@ interface ColumnDef {
   sortable?: boolean;
 }
 
-const ALL_COLUMNS: ColumnDef[] = [
+const BASE_COLUMNS: ColumnDef[] = [
   { id: "security", label: "銘柄", sortable: true },
   { id: "sector", label: "セクター", sortable: true },
   { id: "dividendYield", label: "配当利回り", align: "right", sortable: true },
@@ -52,7 +52,29 @@ const DEFAULT_SORT_STATE: SortState = { columnId: "security", direction: "asc" }
 const REFRESHABLE_COLUMNS: ColumnId[] = ["sector", "dividendYield", "currentPrice"];
 
 function isColumnId(value: unknown): value is ColumnId {
-  return typeof value === "string" && ALL_COLUMNS.some((c) => c.id === value);
+  return typeof value === "string" && BASE_COLUMNS.some((c) => c.id === value);
+}
+
+function getDisplayColumns(isMutualFundOnly: boolean): ColumnDef[] {
+  if (!isMutualFundOnly) {
+    return BASE_COLUMNS;
+  }
+
+  return BASE_COLUMNS.map((column) => {
+    if (column.id === "dividendYield") {
+      return { ...column, label: "分配利回り" };
+    }
+
+    if (column.id === "dividendYieldCost") {
+      return { ...column, label: "取得分配利回り" };
+    }
+
+    if (column.id === "dividends") {
+      return { ...column, label: "予想分配金" };
+    }
+
+    return column;
+  });
 }
 
 function getStoredSortState(): SortState {
@@ -121,11 +143,15 @@ export function HoldingsTable({
   refreshingAll?: boolean;
   refreshingUrls?: boolean;
 }) {
-  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(new Set(ALL_COLUMNS.map((c) => c.id)));
+  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(
+    new Set(BASE_COLUMNS.map((c) => c.id))
+  );
   const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false);
   const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT_STATE);
   const [isSortStateLoaded, setIsSortStateLoaded] = useState(false);
   const [sortMenuColumnId, setSortMenuColumnId] = useState<ColumnId | null>(null);
+  const isMutualFundOnly = holdings.length > 0 && holdings.every((h) => h.security.type === "mutualFund");
+  const columns = useMemo(() => getDisplayColumns(isMutualFundOnly), [isMutualFundOnly]);
 
   const toggleColumn = (id: ColumnId) => {
     const newSet = new Set(visibleColumns);
@@ -168,9 +194,9 @@ export function HoldingsTable({
   const refreshingColumnLabels = useMemo(
     () =>
       refreshingColumnIds.map(
-        (columnId) => ALL_COLUMNS.find((column) => column.id === columnId)?.label ?? columnId
+        (columnId) => columns.find((column) => column.id === columnId)?.label ?? columnId
       ),
-    [refreshingColumnIds]
+    [columns, refreshingColumnIds]
   );
   const isAnyRefreshInProgress = Boolean(
     refreshingAll || refreshingUrls || refreshingColumnIds.length > 0
@@ -233,7 +259,7 @@ export function HoldingsTable({
                   <div className="fixed inset-0 z-10" onClick={() => setIsColumnSelectorOpen(false)} />
                   <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-popover ring-1 ring-black ring-opacity-5 z-20 max-h-96 overflow-y-auto">
                     <div className="py-1" role="menu" aria-orientation="vertical">
-                      {ALL_COLUMNS.map((col) => (
+                      {columns.map((col) => (
                         <div key={col.id} className="flex items-center px-4 py-2 hover:bg-muted/50 cursor-pointer" onClick={() => toggleColumn(col.id)}>
                           <input
                             id={`col-${col.id}`}
@@ -265,7 +291,7 @@ export function HoldingsTable({
         <table className="min-w-full divide-y divide-border">
           <thead>
             <tr className="bg-muted/50 border-b border-border">
-              {ALL_COLUMNS.filter((c) => visibleColumns.has(c.id)).map((column) => (
+              {columns.filter((c) => visibleColumns.has(c.id)).map((column) => (
                 <th
                   key={column.id}
                   className={`px-6 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap ${
@@ -431,7 +457,7 @@ export function HoldingsTable({
 
               return (
                 <tr key={`${h.security.ticker}-${i}`} className="group hover:bg-muted/50 transition-colors">
-                  {ALL_COLUMNS.filter(c => visibleColumns.has(c.id)).map((column) => (
+                  {columns.filter(c => visibleColumns.has(c.id)).map((column) => (
                      <td key={column.id} className={`px-6 py-4 whitespace-nowrap ${
                         column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'
                       } ${
