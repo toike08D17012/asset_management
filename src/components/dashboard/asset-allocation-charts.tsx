@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import type { HoldingData } from "@/types/api";
 import { getMutualFundDivisor } from "@/lib/format";
+import { normalizeSecurityNameForDisplay } from "@/lib/security-name-display";
 
 interface AssetAllocationChartsProps {
   holdings: HoldingData[];
@@ -54,7 +55,8 @@ export function AssetAllocationCharts({ holdings, title }: AssetAllocationCharts
       total += marketValue;
 
       // By Ticker
-      const tickerKey = h.security.name || h.security.ticker;
+      const displayName = normalizeSecurityNameForDisplay(h.security.name);
+      const tickerKey = displayName || h.security.ticker;
       tickerMap.set(tickerKey, (tickerMap.get(tickerKey) || 0) + marketValue);
 
       // By Sector

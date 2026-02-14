@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { HoldingData } from "@/types/api";
 import { formatJPY, formatUSD, getMutualFundDivisor } from "@/lib/format";
+import { normalizeSecurityNameForDisplay } from "@/lib/security-name-display";
 
 type ColumnId = 
   | "security"
@@ -94,9 +95,13 @@ function getSortValue(h: HoldingData, columnId: ColumnId): number | string {
   const avgPrice = h.weightedAveragePrice?.amount ?? h.averagePurchasePrice?.amount ?? 0;
   const curPrice = h.currentPrice?.amount ?? 0;
   const divisor = getMutualFundDivisor(h.security.type);
+  const displayName = normalizeSecurityNameForDisplay(h.security.name);
 
   switch (columnId) {
-    case "security": return h.security.type === "mutualFund" ? h.security.name : h.security.ticker;
+    case "security":
+      return h.security.type === "mutualFund"
+        ? displayName
+        : `${h.security.ticker} ${displayName}`;
     case "sector": return h.sector ?? "";
     case "dividendYield": return h.dividendYield ?? -1;
     case "dividendYieldCost": {
@@ -382,6 +387,7 @@ export function HoldingsTable({
               const divisor = getMutualFundDivisor(h.security.type);
               const totalCost = (qty * avgPrice) / divisor;
               const currentValue = (qty * curPrice) / divisor;
+              const displayName = normalizeSecurityNameForDisplay(h.security.name);
               const gainLoss = currentValue - totalCost;
               const gainLossPercent = totalCost > 0 ? (gainLoss / totalCost) * 100 : 0;
               const isPositive = gainLoss >= 0;
@@ -405,11 +411,15 @@ export function HoldingsTable({
                         </span>
                         <div>
                           {isMutualFund ? (
-                            <p className="font-medium text-foreground truncate max-w-[260px]">{h.security.name}</p>
+                            <p className="font-medium text-foreground truncate max-w-[260px]">
+                              {displayName}
+                            </p>
                           ) : (
                             <>
                               <p className="font-medium text-foreground">{h.security.ticker}</p>
-                              <p className="text-xs text-muted-foreground truncate max-w-[150px]">{h.security.name}</p>
+                              <p className="text-xs text-muted-foreground truncate max-w-[150px]">
+                                {displayName}
+                              </p>
                             </>
                           )}
                         </div>
