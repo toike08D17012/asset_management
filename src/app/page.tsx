@@ -15,14 +15,21 @@ export default function Home() {
   }, []);
 
   async function checkSetupAndUnlockStatus() {
-    const storage = typeof window !== "undefined" ? sessionStorage : undefined;
-    const status = await fetchSetupAndUnlockStatus({
-      fetcher: fetch,
-      storage,
-    });
-    setIsSetup(status.isSetup);
-    setIsUnlocked(status.isUnlocked);
-    setLoading(false);
+    try {
+      const storage = typeof window !== "undefined" ? sessionStorage : undefined;
+      const status = await fetchSetupAndUnlockStatus({
+        fetcher: fetch,
+        storage,
+      });
+      setIsSetup(status.isSetup);
+      setIsUnlocked(status.isUnlocked);
+    } catch (e) {
+      console.error("Failed to check setup status", e);
+      setIsSetup(false);
+      setIsUnlocked(false);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSetupComplete() {

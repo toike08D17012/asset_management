@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { PortfolioSummary } from "@/components/portfolio-summary";
 import { HoldingsTable } from "@/components/holdings-table";
 import type { PortfolioData, HoldingData } from "@/types/api";
-import { EmptyState } from "./empty-state";
+import { EmptyState } from "@/components/dashboard/empty-state";
 
 type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
 type HoldingsDisplayMode = "mixed" | "split";
