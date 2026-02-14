@@ -224,6 +224,10 @@ export function HoldingsTable({
                   key={column.id}
                   className={`px-6 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap ${
                     column.align === "right" ? "text-right" : column.align === "center" ? "text-center" : "text-left"
+                  } ${
+                    column.id === "security"
+                      ? "sticky left-0 z-30 bg-muted shadow-[inset_-1px_0_0_0_hsl(var(--border))]"
+                      : ""
                   }`}
                 >
                   <span className="flex items-center gap-1 group/header">
@@ -369,10 +373,14 @@ export function HoldingsTable({
               };
 
               return (
-                <tr key={`${h.security.ticker}-${i}`} className="hover:bg-muted/50 transition-colors">
+                <tr key={`${h.security.ticker}-${i}`} className="group hover:bg-muted/50 transition-colors">
                   {ALL_COLUMNS.filter(c => visibleColumns.has(c.id)).map((column) => (
                      <td key={column.id} className={`px-6 py-4 whitespace-nowrap ${
                         column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'
+                      } ${
+                        column.id === "security"
+                          ? "sticky left-0 z-20 bg-card shadow-[inset_-1px_0_0_0_hsl(var(--border))] group-hover:bg-muted"
+                          : ""
                       }`}>
                        {renderCell(column.id)}
                      </td>
@@ -386,4 +394,3 @@ export function HoldingsTable({
     </div>
   );
 }
-
