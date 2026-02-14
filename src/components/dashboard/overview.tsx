@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { PortfolioSummary } from "@/components/portfolio-summary";
 import { HoldingsTable } from "@/components/holdings-table";
+import { AssetAllocationCharts } from "@/components/dashboard/asset-allocation-charts";
 import type { PortfolioData, HoldingData } from "@/types/api";
 import { EmptyState } from "@/components/dashboard/empty-state";
 
@@ -110,35 +111,44 @@ export function Overview({
         </div>
 
         {displayMode === "mixed" ? (
-          <HoldingsTable
-            title="全銘柄一覧"
-            description="すべての保有銘柄を表示します"
-            holdings={holdings}
-            onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
-            onForceRefreshAll={onRefreshAll}
-            refreshingColumns={refreshingColumns as any} 
-            refreshingAll={refreshing}
-          />
-        ) : (
           <div className="space-y-8">
+            <AssetAllocationCharts holdings={holdings} />
             <HoldingsTable
-              title="株式・ETF・REIT"
-              description="市場で取引される銘柄"
-              holdings={stockHoldings}
+              title="全銘柄一覧"
+              description="すべての保有銘柄を表示します"
+              holdings={holdings}
               onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
               onForceRefreshAll={onRefreshAll}
-              refreshingColumns={refreshingColumns as any}
+              refreshingColumns={refreshingColumns as any} 
               refreshingAll={refreshing}
             />
-            <HoldingsTable
-              title="投資信託"
-              description="基準価額で取引される銘柄"
-              holdings={mutualFundHoldings}
-              onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
-              onForceRefreshAll={onRefreshAll}
-              refreshingColumns={refreshingColumns as any}
-              refreshingAll={refreshing}
-            />
+          </div>
+        ) : (
+          <div className="space-y-12">
+            <div className="space-y-6">
+              <AssetAllocationCharts holdings={stockHoldings} />
+              <HoldingsTable
+                title="株式・ETF・REIT"
+                description="市場で取引される銘柄"
+                holdings={stockHoldings}
+                onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
+                onForceRefreshAll={onRefreshAll}
+                refreshingColumns={refreshingColumns as any}
+                refreshingAll={refreshing}
+              />
+            </div>
+            <div className="space-y-6">
+              <AssetAllocationCharts holdings={mutualFundHoldings} />
+              <HoldingsTable
+                title="投資信託"
+                description="基準価額で取引される銘柄"
+                holdings={mutualFundHoldings}
+                onForceRefreshColumn={(id) => onRefreshCol?.(id as MarketColumnId)}
+                onForceRefreshAll={onRefreshAll}
+                refreshingColumns={refreshingColumns as any}
+                refreshingAll={refreshing}
+              />
+            </div>
           </div>
         )}
       </div>
