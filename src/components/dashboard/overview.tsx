@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { PortfolioSummary } from "@/components/portfolio-summary";
 import { HoldingsTable } from "@/components/holdings-table";
 import type { PortfolioData, HoldingData } from "@/types/api";
@@ -6,6 +6,7 @@ import { EmptyState } from "./empty-state";
 
 type MarketColumnId = "sector" | "dividendYield" | "currentPrice";
 type HoldingsDisplayMode = "mixed" | "split";
+const STORAGE_KEY = "dashboard-overview-display-mode";
 
 interface OverviewProps {
   portfolio: PortfolioData | null;
@@ -31,6 +32,26 @@ export function Overview({
   onImport,
 }: OverviewProps) {
   const [displayMode, setDisplayMode] = useState<HoldingsDisplayMode>("mixed");
+
+  useEffect(() => {
+    try {
+      const savedMode = localStorage.getItem(STORAGE_KEY);
+      if (savedMode === "mixed" || savedMode === "split") {
+        setDisplayMode(savedMode);
+      }
+    } catch (e) {
+      console.warn("Failed to read display mode from local storage", e);
+    }
+  }, []);
+
+  const handleDisplayModeChange = (mode: HoldingsDisplayMode) => {
+    setDisplayMode(mode);
+    try {
+      localStorage.setItem(STORAGE_KEY, mode);
+    } catch (e) {
+      console.warn("Failed to save display mode to local storage", e);
+    }
+  };
 
   const stockHoldings = useMemo(() => 
     holdings.filter(h => h.security.type === "stock"), 
@@ -66,7 +87,7 @@ export function Overview({
           <h2 className="text-xl font-semibold tracking-tight">保有資産</h2>
           <div className="flex items-center space-x-2 bg-muted p-1 rounded-lg">
             <button
-              onClick={() => setDisplayMode("mixed")}
+              onClick={() => handleDisplayModeChange("mixed")}
               className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${
                 displayMode === "mixed"
                   ? "bg-background text-foreground shadow-sm"
@@ -76,7 +97,7 @@ export function Overview({
               すべて
             </button>
             <button
-              onClick={() => setDisplayMode("split")}
+              onClick={() => handleDisplayModeChange("split")}
               className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${
                 displayMode === "split"
                   ? "bg-background text-foreground shadow-sm"
