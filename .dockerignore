@@ -1,0 +1,11 @@
+.git
+.github
+.claude
+node_modules
+.next
+dist
+coverage
+tmp
+*.log
+.DS_Store
+data/**/*.db
