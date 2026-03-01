@@ -221,21 +221,100 @@ export async function fetchYahooMarketData(
   const preferredSymbol = normalizedSymbol ?? cachedResolvedSymbol;
 
   const data = await fetchMarketDataByMode(input, preferredSymbol, googleSymbol, forceResolveSymbol);
-  const resolvedSymbol = data?.yahooSymbol ?? preferredSymbol;
+  const dataWithDividendFallback = await tryFillMissingStockDividendYield(
+    input,
+    data,
+    preferredSymbol,
+    googleSymbol,
+  );
+  const resolvedSymbol = dataWithDividendFallback?.yahooSymbol ?? preferredSymbol;
 
   const now = Date.now();
   memoryMarketDataCache.set(memoryCacheKey, {
     expiresAt: now + CACHE_TTL_MS,
-    value: data,
+    value: dataWithDividendFallback,
   });
 
   if (resolvedSymbol) {
     await savePersistedYahooSymbol(input, resolvedSymbol);
   }
 
-  await savePersistedMarketData(input, googleSymbol, todayJst, data, resolvedSymbol);
+  await savePersistedMarketData(input, googleSymbol, todayJst, dataWithDividendFallback, resolvedSymbol);
 
-  return data;
+  return dataWithDividendFallback;
+}
+
+export async function tryFillMissingStockDividendYield(
+  input: MarketDataInput,
+  baseData: YahooMarketData | null,
+  preferredSymbol: string | null,
+  googleSymbol: string,
+): Promise<YahooMarketData | null> {
+  if (input.securityType !== "stock") {
+    return baseData;
+  }
+
+  if (baseData?.dividendYield !== null && baseData?.dividendYield !== undefined) {
+    return baseData;
+  }
+
+  const fallbackSymbol = baseData?.yahooSymbol ?? preferredSymbol;
+  const fromYahooScraping = await fetchFromYahooJapanPage(input, fallbackSymbol, googleSymbol, false);
+
+  const mergedFromYahoo = mergeMarketDataPreferExisting(baseData, fromYahooScraping, fallbackSymbol);
+  if (mergedFromYahoo?.dividendYield !== null && mergedFromYahoo?.dividendYield !== undefined) {
+    return mergedFromYahoo;
+  }
+
+  const fromGoogleDividendYield = await fetchGoogleFinanceDividendYield(googleSymbol);
+  if (fromGoogleDividendYield === null) {
+    return mergedFromYahoo;
+  }
+
+  if (mergedFromYahoo) {
+    return {
+      ...mergedFromYahoo,
+      dividendYield: fromGoogleDividendYield,
+    };
+  }
+
+  if (!fallbackSymbol) {
+    return null;
+  }
+
+  return {
+    sector: null,
+    dividendYield: fromGoogleDividendYield,
+    currentPrice: null,
+    yahooSymbol: fallbackSymbol,
+    googleSymbol,
+  };
+}
+
+function mergeMarketDataPreferExisting(
+  base: YahooMarketData | null,
+  fallback: YahooMarketData | null,
+  preferredSymbol: string | null,
+): YahooMarketData | null {
+  if (!base && !fallback) {
+    return null;
+  }
+
+  const yahooSymbol =
+    base?.yahooSymbol ?? fallback?.yahooSymbol ?? normalizeExtractedYahooSymbol(preferredSymbol) ?? null;
+  const googleSymbol = base?.googleSymbol ?? fallback?.googleSymbol ?? null;
+
+  if (!yahooSymbol || !googleSymbol) {
+    return null;
+  }
+
+  return {
+    sector: base?.sector ?? fallback?.sector ?? null,
+    dividendYield: base?.dividendYield ?? fallback?.dividendYield ?? null,
+    currentPrice: base?.currentPrice ?? fallback?.currentPrice ?? null,
+    yahooSymbol,
+    googleSymbol,
+  };
 }
 
 function getMarketDataSourceMode(): MarketDataSourceMode {
@@ -324,6 +403,63 @@ async function fetchFromYahooQuoteApi(
   } catch {
     return null;
   }
+}
+
+async function fetchGoogleFinanceDividendYield(googleSymbol: string): Promise<number | null> {
+  const symbol = googleSymbol.trim();
+  if (!symbol) {
+    return null;
+  }
+
+  try {
+    const quoteUrl = `https://www.google.com/finance/quote/${encodeURIComponent(symbol)}`;
+    const response = await fetch(quoteUrl, {
+      headers: {
+        "User-Agent": YAHOO_JP_USER_AGENT,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const html = await response.text();
+    return parseGoogleFinanceDividendYieldFromHtml(html);
+  } catch {
+    return null;
+  }
+}
+
+export function parseGoogleFinanceDividendYieldFromHtml(html: string): number | null {
+  const fromHtml = html.match(
+    /(?:Dividend\s*yield|配当利回り)[\s\S]{0,200}?([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*[%％]/iu,
+  );
+  const fromHtmlNumber = toFiniteNumber(fromHtml?.[1] ?? null);
+  if (fromHtmlNumber !== null && fromHtmlNumber >= 0) {
+    return normalizeDividendPercent(fromHtmlNumber);
+  }
+
+  const plainText = htmlToPlainText(html);
+  const fromText = plainText.match(
+    /(?:Dividend\s*yield|配当利回り)\s*[:：]?\s*([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*[%％]/iu,
+  );
+  const fromTextNumber = toFiniteNumber(fromText?.[1] ?? null);
+  if (fromTextNumber !== null && fromTextNumber >= 0) {
+    return normalizeDividendPercent(fromTextNumber);
+  }
+
+  const reverseText = plainText.match(
+    /([0-9０-９][0-9０-９,，]*(?:[\.．][0-9０-９]+)?)\s*[%％]\s*(?:Dividend\s*yield|配当利回り)/iu,
+  );
+  const reverseTextNumber = toFiniteNumber(reverseText?.[1] ?? null);
+  if (reverseTextNumber !== null && reverseTextNumber >= 0) {
+    return normalizeDividendPercent(reverseTextNumber);
+  }
+
+  return null;
 }
 
 export function marketDataInputKey(input: MarketDataInput): string {

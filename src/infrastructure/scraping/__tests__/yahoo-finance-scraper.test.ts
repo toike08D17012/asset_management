@@ -1,13 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   normalizeYahooSymbol,
   toGoogleFinanceSymbol,
   parseYahooJapanHtml,
   extractPreloadedState,
   parseYahooJapanFundReferenceInformationDividendYield,
+  parseGoogleFinanceDividendYieldFromHtml,
+  tryFillMissingStockDividendYield,
   extractYahooSymbolsFromSearchHtml,
   rankYahooSymbolsByQueryFromSearchHtml,
 } from "@/infrastructure/scraping/yahoo-finance-scraper";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("yahoo-finance-scraper", () => {
   it("日本株コードをYahoo形式に変換する", () => {
@@ -315,6 +321,32 @@ describe("yahoo-finance-scraper", () => {
     expect(normalized).toBeCloseTo(0.0501, 6);
   });
 
+  it("Google Finance HTMLからDividend yieldを抽出して比率化できる", () => {
+    const html = `
+      <html><body>
+        <div>Dividend yield</div>
+        <div>2.31%</div>
+      </body></html>
+    `;
+
+    const parsed = parseGoogleFinanceDividendYieldFromHtml(html);
+
+    expect(parsed).toBeCloseTo(0.0231, 6);
+  });
+
+  it("Google Finance HTMLから配当利回り(日本語表記)を抽出できる", () => {
+    const html = `
+      <html><body>
+        <div>配当利回り</div>
+        <div>０.８５％</div>
+      </body></html>
+    `;
+
+    const parsed = parseGoogleFinanceDividendYieldFromHtml(html);
+
+    expect(parsed).toBeCloseTo(0.0085, 6);
+  });
+
   it("数値以外の currentPrice 文字列を価格として誤抽出しない", () => {
     const html = `
       <html><body>
@@ -360,5 +392,133 @@ describe("yahoo-finance-scraper", () => {
     const symbols = rankYahooSymbolsByQueryFromSearchHtml(html, query);
 
     expect(symbols[0]).toBe("8931C242");
+  });
+
+  it("個別株で配当欠損時はYahooスクレイピングで補完し、Googleへはフォールバックしない", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          `
+          <html><body><script>
+          window.__PRELOADED_STATE__ = {
+            "mainStocksPriceBoard": {
+              "priceBoard": {
+                "industry": { "industryName": "輸送用機器" },
+                "shareDividendYield": 2.34,
+                "price": 3000
+              }
+            }
+          };
+          </script></body></html>
+          `,
+          { status: 200, headers: { "Content-Type": "text/html" } },
+        ),
+      );
+
+    const result = await tryFillMissingStockDividendYield(
+      {
+        ticker: "7203",
+        currency: "JPY",
+        securityType: "stock",
+      },
+      {
+        sector: "自動車",
+        dividendYield: null,
+        currentPrice: 3000,
+        yahooSymbol: "7203.T",
+        googleSymbol: "7203:TYO",
+      },
+      "7203.T",
+      "7203:TYO",
+    );
+
+    expect(result?.dividendYield).toBeCloseTo(0.0234, 6);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const calledUrl = String(fetchMock.mock.calls[0]?.[0]);
+    expect(calledUrl).toContain("finance.yahoo.co.jp/quote/");
+  });
+
+  it("個別株でYahooでも配当取得できない場合はGoogleにフォールバックする", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          `
+          <html><body><script>
+          window.__PRELOADED_STATE__ = {
+            "mainStocksPriceBoard": {
+              "priceBoard": {
+                "industry": { "industryName": "輸送用機器" },
+                "price": 3000
+              }
+            }
+          };
+          </script></body></html>
+          `,
+          { status: 200, headers: { "Content-Type": "text/html" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          `
+          <html><body>
+            <div>Dividend yield</div>
+            <div>1.11%</div>
+          </body></html>
+          `,
+          { status: 200, headers: { "Content-Type": "text/html" } },
+        ),
+      );
+
+    const result = await tryFillMissingStockDividendYield(
+      {
+        ticker: "7203",
+        currency: "JPY",
+        securityType: "stock",
+      },
+      {
+        sector: "自動車",
+        dividendYield: null,
+        currentPrice: 3000,
+        yahooSymbol: "7203.T",
+        googleSymbol: "7203:TYO",
+      },
+      "7203.T",
+      "7203:TYO",
+    );
+
+    expect(result?.dividendYield).toBeCloseTo(0.0111, 6);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstUrl = String(fetchMock.mock.calls[0]?.[0]);
+    const secondUrl = String(fetchMock.mock.calls[1]?.[0]);
+    expect(firstUrl).toContain("finance.yahoo.co.jp/quote/");
+    expect(secondUrl).toContain("google.com/finance/quote/");
+  });
+
+  it("個別株以外は配当補完を行わずそのまま返す", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const baseData = {
+      sector: "投資信託",
+      dividendYield: null,
+      currentPrice: 10000,
+      yahooSymbol: "8931123C",
+      googleSymbol: "SBI-JPN-DIV",
+    } as const;
+
+    const result = await tryFillMissingStockDividendYield(
+      {
+        ticker: "SBI-JPN-DIV",
+        name: "ＳＢＩ日本高配当株式（分配）ファンド（年４回決算型）",
+        currency: "JPY",
+        securityType: "mutualFund",
+      },
+      baseData,
+      "8931123C",
+      "SBI-JPN-DIV",
+    );
+
+    expect(result).toEqual(baseData);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
