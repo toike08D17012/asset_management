@@ -89,13 +89,13 @@ describe("HoldingsService", () => {
   });
 
   it("adds manual holding and defaults averagePurchasePrice to currentPrice when omitted", async () => {
-    let savedHolding: Holding | null = null;
+    const state: { savedHolding: Holding | null } = { savedHolding: null };
 
     const holdingRepo: IHoldingRepository = {
       findById: async () => ok(null),
       query: async () => ok([]),
       save: async (entity) => {
-        savedHolding = entity;
+        state.savedHolding = entity;
         return ok(entity);
       },
       delete: async () => ok(undefined),
@@ -135,7 +135,10 @@ describe("HoldingsService", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(savedHolding).not.toBeNull();
-    expect(savedHolding?.averagePurchasePrice.amount).toBe(3000);
+    expect(state.savedHolding).not.toBeNull();
+    if (!state.savedHolding) {
+      throw new Error("savedHolding should not be null");
+    }
+    expect(state.savedHolding.averagePurchasePrice.amount).toBe(3000);
   });
 });
