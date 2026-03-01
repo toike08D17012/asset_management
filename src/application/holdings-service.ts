@@ -6,6 +6,9 @@
 import {
   type Result,
   createAccountId,
+  type Currency,
+  type QuantityUnit,
+  type SecurityType,
   ok,
   err,
 } from "@/domain/types";
@@ -103,6 +106,57 @@ export class HoldingsService {
     });
 
     return ok(holdings);
+  }
+
+  /**
+   * 手動入力で保有証券を追加する
+   */
+  async addManualHolding(params: {
+    accountId: string;
+    ticker: string;
+    name: string;
+    securityType: SecurityType;
+    currency: Currency;
+    quantity: number;
+    quantityUnit: QuantityUnit;
+    currentPrice: number;
+    averagePurchasePrice?: number | null;
+  }): Promise<Result<Holding>> {
+    const accountResult = await this.accountRepo.findById(params.accountId);
+    if (!accountResult.ok) return accountResult;
+    if (!accountResult.value) {
+      return err(new Error(`Account not found: ${params.accountId}`));
+    }
+
+    const averagePurchasePrice =
+      typeof params.averagePurchasePrice === "number"
+        ? params.averagePurchasePrice
+        : params.currentPrice;
+
+    const holdingResult = createHolding({
+      accountId: accountResult.value.id,
+      security: {
+        ticker: params.ticker,
+        name: params.name,
+        type: params.securityType,
+        currency: params.currency,
+      },
+      quantity: {
+        value: params.quantity,
+        unit: params.quantityUnit,
+      },
+      averagePurchasePrice: {
+        amount: averagePurchasePrice,
+        currency: params.currency,
+      },
+      currentPrice: {
+        amount: params.currentPrice,
+        currency: params.currency,
+      },
+    });
+    if (!holdingResult.ok) return holdingResult;
+
+    return this.holdingRepo.save(holdingResult.value);
   }
 
   /**

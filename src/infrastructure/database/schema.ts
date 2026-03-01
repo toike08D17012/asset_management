@@ -9,7 +9,7 @@ import { sqliteTable, text, real, integer } from "drizzle-orm/sqlite-core";
 export const accounts = sqliteTable("accounts", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  brokerage: text("brokerage", { enum: ["rakuten", "sbi"] }).notNull(),
+  brokerage: text("brokerage", { enum: ["rakuten", "sbi", "other"] }).notNull(),
   encryptedUsername: text("encrypted_username").notNull(),
   encryptedPassword: text("encrypted_password").notNull(),
   createdAt: text("created_at").notNull(),

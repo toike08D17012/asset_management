@@ -21,6 +21,51 @@ function formatCurrency(value: number) {
   return `¥${Math.round(value).toLocaleString()}`;
 }
 
+type PieLabelProps = {
+  cx: number;
+  cy: number;
+  outerRadius: number;
+  midAngle: number;
+  percent: number;
+};
+
+function renderPiePercentLabel({ cx, cy, outerRadius, midAngle, percent }: PieLabelProps) {
+  if (percent < 0.05) return null;
+
+  const RADIAN = Math.PI / 180;
+  const lineStartRadius = outerRadius * 1.02;
+  const labelRadius = outerRadius * 1.14;
+  const lineStartX = cx + lineStartRadius * Math.cos(-midAngle * RADIAN);
+  const lineStartY = cy + lineStartRadius * Math.sin(-midAngle * RADIAN);
+  const labelX = cx + labelRadius * Math.cos(-midAngle * RADIAN);
+  const labelY = cy + labelRadius * Math.sin(-midAngle * RADIAN);
+  const textOffset = labelX > cx ? 4 : -4;
+  const textX = labelX + textOffset;
+
+  return (
+    <g>
+      <line
+        x1={lineStartX}
+        y1={lineStartY}
+        x2={labelX}
+        y2={labelY}
+        stroke="currentColor"
+        strokeWidth={1}
+      />
+      <text
+        x={textX}
+        y={labelY}
+        fill="currentColor"
+        textAnchor={labelX > cx ? "start" : "end"}
+        dominantBaseline="central"
+        className="text-xs"
+      >
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    </g>
+  );
+}
+
 
 function processChartData(data: { name: string; value: number }[], maxItems = 9) {
   if (data.length <= maxItems) return data;
@@ -86,9 +131,9 @@ export function AssetAllocationCharts({ holdings, title }: AssetAllocationCharts
   // Common props for Pie to ensure consistency
   const pieProps = {
     cx: "50%",
-    cy: "40%",
+    cy: "44%",
     innerRadius: 0,
-    outerRadius: 90, // Fixed radius to avoid "collapsed" look
+    outerRadius: 82,
     paddingAngle: 0,
     dataKey: "value",
   };
@@ -107,33 +152,14 @@ export function AssetAllocationCharts({ holdings, title }: AssetAllocationCharts
              */}
             <div className="absolute inset-0">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 28 }}>
                   <Pie
                     data={dataByTicker}
                     {...pieProps}
                     nameKey="name"
                     fill="#8884d8"
-                    label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-                       const RADIAN = Math.PI / 180;
-                       const radius = outerRadius * 1.2;
-                       const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                       const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                       
-                       if (percent < 0.05) return null;
-                       
-                       return (
-                         <text 
-                           x={x} 
-                           y={y} 
-                           fill="currentColor" 
-                           textAnchor={x > cx ? 'start' : 'end'} 
-                           dominantBaseline="central"
-                           className="text-xs"
-                         >
-                           {`${(percent * 100).toFixed(0)}%`}
-                         </text>
-                       );
-                    }}
+                    labelLine={false}
+                    label={renderPiePercentLabel}
                   >
                     {dataByTicker.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} strokeWidth={1} />
@@ -162,32 +188,13 @@ export function AssetAllocationCharts({ holdings, title }: AssetAllocationCharts
           <div className="w-full flex-1 min-h-0 relative">
             <div className="absolute inset-0">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 28 }}>
                   <Pie
                     data={dataBySector}
                     {...pieProps}
                     fill="#82ca9d"
-                    label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-                       const RADIAN = Math.PI / 180;
-                       const radius = outerRadius * 1.2;
-                       const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                       const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                       
-                       if (percent < 0.05) return null;
-                       
-                       return (
-                         <text 
-                           x={x} 
-                           y={y} 
-                           fill="currentColor" 
-                           textAnchor={x > cx ? 'start' : 'end'} 
-                           dominantBaseline="central"
-                           className="text-xs"
-                         >
-                           {`${(percent * 100).toFixed(0)}%`}
-                         </text>
-                       );
-                    }}
+                    labelLine={false}
+                    label={renderPiePercentLabel}
                   >
                     {dataBySector.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} strokeWidth={1} />

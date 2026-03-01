@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Encoding from "encoding-japanese";
 import type { AccountSummary } from "@/types/api";
+import { Brokerage, brokerageDisplayName } from "@/domain/types";
 
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
@@ -15,20 +16,22 @@ export function CSVImportModal({
   onClose: () => void;
   onImportComplete: () => void;
 }) {
+  const csvSupportedAccounts = accounts.filter(
+    (account) => account.brokerage !== Brokerage.OTHER,
+  );
   const [selectedAccount, setSelectedAccount] = useState(
-    accounts.length > 0 ? accounts[0].id : ""
+    csvSupportedAccounts.length > 0 ? csvSupportedAccounts[0].id : ""
   );
   const [csvContent, setCSVContent] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
-
   useEffect(() => {
-    if (!selectedAccount && accounts.length > 0) {
-      setSelectedAccount(accounts[0].id);
+    if (!selectedAccount && csvSupportedAccounts.length > 0) {
+      setSelectedAccount(csvSupportedAccounts[0].id);
     }
-  }, [accounts, selectedAccount]);
+  }, [csvSupportedAccounts, selectedAccount]);
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -169,6 +172,10 @@ export function CSVImportModal({
             <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">
               先に証券口座を登録してください。「証券口座」タブから口座を追加できます。
             </div>
+          ) : csvSupportedAccounts.length === 0 ? (
+            <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm">
+              CSVインポートは楽天証券/SBI証券口座のみ対応しています。その他口座は「口座管理」から手動入力してください。
+            </div>
           ) : (
             <>
               <div>
@@ -180,9 +187,9 @@ export function CSVImportModal({
                   onChange={(e) => setSelectedAccount(e.target.value)}
                   className="w-full px-4 py-2 border border-input bg-background rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
                 >
-                  {accounts.map((a) => (
+                  {csvSupportedAccounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.name} ({a.brokerage === "rakuten" ? "楽天証券" : "SBI証券"})
+                      {a.name} ({brokerageDisplayName(a.brokerage)})
                     </option>
                   ))}
                 </select>

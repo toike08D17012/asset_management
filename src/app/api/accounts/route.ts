@@ -36,13 +36,17 @@ export const POST = requireAuth(async (request: NextRequest) => {
     const brokerageResult = readEnumField(
       bodyResult.data,
       "brokerage",
-      [Brokerage.RAKUTEN, Brokerage.SBI] as const,
+      [Brokerage.RAKUTEN, Brokerage.SBI, Brokerage.OTHER] as const,
       { required: true, label: "証券会社" },
     );
     if (!brokerageResult.ok) return brokerageResult.response;
 
+    const brokerage = brokerageResult.value!;
+    const requiresCredential =
+      brokerage === Brokerage.RAKUTEN || brokerage === Brokerage.SBI;
+
     const usernameResult = readStringField(bodyResult.data, "username", {
-      required: true,
+      required: requiresCredential,
       minLength: 1,
       maxLength: 256,
       label: "ログインID",
@@ -50,7 +54,7 @@ export const POST = requireAuth(async (request: NextRequest) => {
     if (!usernameResult.ok) return usernameResult.response;
 
     const passwordResult = readStringField(bodyResult.data, "password", {
-      required: true,
+      required: requiresCredential,
       minLength: 1,
       maxLength: 256,
       trim: false,
@@ -63,9 +67,9 @@ export const POST = requireAuth(async (request: NextRequest) => {
 
     const result = await serviceResult.value.addAccount({
       name: nameResult.value!,
-      brokerage: brokerageResult.value!,
-      username: usernameResult.value!,
-      password: passwordResult.value!,
+      brokerage,
+      username: usernameResult.value ?? "",
+      password: passwordResult.value ?? "",
     });
 
     return resultToResponse(result, { wrapKey: "account", status: 201 });

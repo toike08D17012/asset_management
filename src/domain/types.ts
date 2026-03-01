@@ -45,6 +45,7 @@ export type Currency = (typeof Currency)[keyof typeof Currency];
 export const Brokerage = {
   RAKUTEN: "rakuten",
   SBI: "sbi",
+  OTHER: "other",
 } as const;
 export type Brokerage = (typeof Brokerage)[keyof typeof Brokerage];
 
@@ -54,6 +55,8 @@ export function brokerageDisplayName(brokerage: Brokerage): string {
       return "楽天証券";
     case Brokerage.SBI:
       return "SBI証券";
+    case Brokerage.OTHER:
+      return "その他";
   }
 }
 

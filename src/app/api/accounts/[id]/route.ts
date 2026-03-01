@@ -81,7 +81,7 @@ export const PUT = requireAuth(async (
     const brokerageResult = readEnumField(
       bodyResult.data,
       "brokerage",
-      [Brokerage.RAKUTEN, Brokerage.SBI] as const,
+      [Brokerage.RAKUTEN, Brokerage.SBI, Brokerage.OTHER] as const,
       { required: false, label: "証券会社" },
     );
     if (!brokerageResult.ok) return brokerageResult.response;

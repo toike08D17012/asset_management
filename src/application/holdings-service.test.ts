@@ -87,4 +87,55 @@ describe("HoldingsService", () => {
       ]);
     }
   });
+
+  it("adds manual holding and defaults averagePurchasePrice to currentPrice when omitted", async () => {
+    let savedHolding: Holding | null = null;
+
+    const holdingRepo: IHoldingRepository = {
+      findById: async () => ok(null),
+      query: async () => ok([]),
+      save: async (entity) => {
+        savedHolding = entity;
+        return ok(entity);
+      },
+      delete: async () => ok(undefined),
+      findByAccountId: async () => ok([]),
+      saveMany: async () => ok(undefined),
+      deleteByAccountId: async () => ok(undefined),
+      deleteAll: async () => ok(undefined),
+    };
+
+    const accountRepo: IAccountRepository = {
+      findById: async () =>
+        ok({
+          id: createAccountId("account-id"),
+          name: "manual",
+          brokerage: Brokerage.OTHER,
+          encryptedUsername: "enc-user",
+          encryptedPassword: "enc-pass",
+          createdAt: new Date(),
+          lastSyncedAt: null,
+        }),
+      query: async () => ok([]),
+      save: async (entity) => ok(entity),
+      delete: async () => ok(undefined),
+      updateLastSyncedAt: async () => ok(undefined),
+    };
+
+    const service = new HoldingsService(holdingRepo, accountRepo);
+    const result = await service.addManualHolding({
+      accountId: "account-id",
+      ticker: "7203",
+      name: "トヨタ自動車",
+      securityType: "stock",
+      currency: "JPY",
+      quantity: 10,
+      quantityUnit: "shares",
+      currentPrice: 3000,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(savedHolding).not.toBeNull();
+    expect(savedHolding?.averagePurchasePrice.amount).toBe(3000);
+  });
 });
