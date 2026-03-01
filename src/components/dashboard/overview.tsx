@@ -120,7 +120,7 @@ export function Overview({
 
   return (
     <div className="space-y-8">
-      {portfolio && <PortfolioSummary portfolio={portfolio} />}
+      {portfolio && <PortfolioSummary portfolio={portfolio} holdings={holdings} />}
       
       <div className="space-y-4">
         <div className="flex items-center justify-between">

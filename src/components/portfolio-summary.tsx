@@ -1,16 +1,50 @@
 "use client";
 
 import type { PortfolioData } from "@/types/api";
+import type { HoldingData } from "@/types/api";
 import { formatJPY, formatUSD } from "@/lib/format";
+import { getMutualFundDivisor } from "@/lib/format";
 
 export function PortfolioSummary({
   portfolio,
+  holdings,
 }: {
   portfolio: PortfolioData | null;
+  holdings: HoldingData[];
 }) {
   if (!portfolio) {
     return null;
   }
+
+  let annualDividendJPY = 0;
+  let annualDividendUSD = 0;
+
+  for (const holding of holdings) {
+    if (typeof holding.dividendYield !== "number") {
+      continue;
+    }
+
+    const quantity = holding.totalQuantity?.value ?? holding.quantity?.value ?? 0;
+    const currentPrice = holding.currentPrice?.amount ?? 0;
+    const divisor = getMutualFundDivisor(holding.security.type);
+    const annualDividend = (quantity * currentPrice * holding.dividendYield) / divisor;
+
+    if (holding.security.currency === "JPY") {
+      annualDividendJPY += annualDividend;
+    } else {
+      annualDividendUSD += annualDividend;
+    }
+  }
+
+  const annualDividendDisplayParts: string[] = [];
+  if (annualDividendJPY > 0) {
+    annualDividendDisplayParts.push(formatJPY(annualDividendJPY));
+  }
+  if (annualDividendUSD > 0) {
+    annualDividendDisplayParts.push(formatUSD(annualDividendUSD));
+  }
+
+  const annualDividendDisplay = annualDividendDisplayParts.join(" / ") || "-";
 
   const cards = [
     {
@@ -43,10 +77,16 @@ export function PortfolioSummary({
       subtext: "口座",
       simple: true,
     },
+    {
+      title: "年間配当総額（予想）",
+      value: annualDividendDisplay,
+      subtext: "配当利回り × 現在値ベース",
+      simple: false,
+    },
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
       {cards.map((card, i) => (
         <div key={i} className="bg-card text-card-foreground rounded-xl border border-border p-6 shadow-sm transition-all hover:shadow-md">
           <p className="text-sm font-medium text-muted-foreground">{card.title}</p>
