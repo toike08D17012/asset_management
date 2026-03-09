@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { PortfolioSummary } from "@/components/portfolio-summary";
 import { HoldingsTable, type MarketColumnId } from "@/components/holdings-table";
 import { AssetAllocationCharts } from "@/components/dashboard/asset-allocation-charts";
-import type { PortfolioData, HoldingData } from "@/types/api";
+import type { PortfolioData, HoldingData, SnapshotComparisonResponse } from "@/types/api";
 import { EmptyState } from "@/components/dashboard/empty-state";
 
 type HoldingsDisplayMode = "mixed" | "split";
@@ -13,6 +13,7 @@ const SPLIT_ASSET_TYPE_STORAGE_KEY = "dashboard-overview-split-asset-type";
 interface OverviewProps {
   portfolio: PortfolioData | null;
   holdings: HoldingData[];
+  snapshotComparison?: SnapshotComparisonResponse | null;
   loadingPortfolio: boolean;
   loadingHoldings: boolean;
   refreshingAll?: boolean;
@@ -27,6 +28,7 @@ interface OverviewProps {
 export function Overview({
   portfolio,
   holdings,
+  snapshotComparison,
   loadingPortfolio,
   loadingHoldings,
   refreshingAll,
@@ -156,6 +158,7 @@ export function Overview({
               title="全銘柄一覧"
               description="すべての保有銘柄を表示します"
               holdings={holdings}
+              snapshotComparison={snapshotComparison}
               onForceRefreshColumn={(id) => onRefreshCol?.(id)}
               onForceRefreshAll={onRefreshAll}
               onForceRefreshUrls={onRefreshUrls}
@@ -197,6 +200,7 @@ export function Overview({
               title={activeSplitTitle}
               description={activeSplitDescription}
               holdings={activeSplitHoldings}
+              snapshotComparison={snapshotComparison}
               onForceRefreshColumn={(id) => onRefreshCol?.(id)}
               onForceRefreshAll={onRefreshAll}
               onForceRefreshUrls={onRefreshUrls}

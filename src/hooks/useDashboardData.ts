@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
-import type { PortfolioData, AccountSummary, HoldingData } from "@/types/api";
+import type { PortfolioData, AccountSummary, HoldingData, SnapshotComparisonResponse } from "@/types/api";
 
 interface UseDashboardDataResult {
   portfolio: PortfolioData | null;
   holdings: HoldingData[];
   accounts: AccountSummary[];
+  snapshotComparison: SnapshotComparisonResponse | null;
   loadingPortfolio: boolean;
   loadingHoldings: boolean;
   loadingAccounts: boolean;
@@ -17,6 +18,7 @@ export function useDashboardData(): UseDashboardDataResult {
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
   const [holdings, setHoldings] = useState<HoldingData[]>([]);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [snapshotComparison, setSnapshotComparison] = useState<SnapshotComparisonResponse | null>(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(true);
   const [loadingHoldings, setLoadingHoldings] = useState(true);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
@@ -107,7 +109,7 @@ export function useDashboardData(): UseDashboardDataResult {
         if (res.status === 401) {
             if (typeof window !== "undefined") {
               sessionStorage.removeItem("encryptionUnlocked");
-              window.location.reload(); 
+              window.location.reload();
             }
             return;
         }
@@ -126,7 +128,20 @@ export function useDashboardData(): UseDashboardDataResult {
       }
     })();
 
-    await Promise.all([portfolioTask, holdingsTask, accountsTask]);
+    const snapshotComparisonTask = (async () => {
+      try {
+        const res = await fetch("/api/snapshots?type=comparison");
+        if (res.ok) {
+          const data = await res.json();
+          setSnapshotComparison(data);
+        }
+        // スナップショットが取得できない場合は静かに無視する（オプション機能）
+      } catch {
+        // 比較機能はオプションのためエラーを伝播しない
+      }
+    })();
+
+    await Promise.all([portfolioTask, holdingsTask, accountsTask, snapshotComparisonTask]);
     setRefreshing(false);
   }, []);
 
@@ -138,6 +153,7 @@ export function useDashboardData(): UseDashboardDataResult {
     portfolio,
     holdings,
     accounts,
+    snapshotComparison,
     loadingPortfolio,
     loadingHoldings,
     loadingAccounts,

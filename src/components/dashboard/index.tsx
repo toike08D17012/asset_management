@@ -14,6 +14,7 @@ export function Dashboard() {
     portfolio,
     holdings,
     accounts,
+    snapshotComparison,
     loadingPortfolio,
     loadingHoldings,
     loadingAccounts,
@@ -128,6 +129,7 @@ export function Dashboard() {
           <Overview
             portfolio={portfolio}
             holdings={holdings}
+            snapshotComparison={snapshotComparison}
             loadingPortfolio={loadingPortfolio}
             loadingHoldings={loadingHoldings}
             refreshingAll={refreshingAllMarketData}
