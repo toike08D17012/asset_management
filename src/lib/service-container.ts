@@ -18,7 +18,8 @@ import { AccountService } from "@/application/account-service";
 import { HoldingsService } from "@/application/holdings-service";
 import { AccountRepository } from "@/infrastructure/repositories/account-repository";
 import { HoldingRepository } from "@/infrastructure/repositories/holding-repository";
-import type { IAccountRepository, IHoldingRepository } from "@/domain/repositories";
+import { SnapshotRepository } from "@/infrastructure/repositories/snapshot-repository";
+import type { IAccountRepository, IHoldingRepository, ISnapshotRepository } from "@/domain/repositories";
 import { type Result, ok, err } from "@/domain/types";
 import { toErrorMessage } from "@/lib/errors";
 import { eq } from "drizzle-orm";
@@ -27,6 +28,7 @@ let _initialized = false;
 let _encryptionService: EncryptionService | null = null;
 let _accountRepository: IAccountRepository | null = null;
 let _holdingRepository: IHoldingRepository | null = null;
+let _snapshotRepository: ISnapshotRepository | null = null;
 let _accountService: AccountService | null = null;
 let _holdingsService: HoldingsService | null = null;
 
@@ -38,6 +40,7 @@ export function ensureInitialized(): void {
     initializeDatabase();
     _accountRepository = new AccountRepository();
     _holdingRepository = new HoldingRepository();
+    _snapshotRepository = new SnapshotRepository();
     _initialized = true;
   }
 }
@@ -166,4 +169,15 @@ export function getHoldingsService(): Result<HoldingsService> {
     _holdingsService = new HoldingsService(_holdingRepository!, _accountRepository!);
   }
   return ok(_holdingsService);
+}
+
+/**
+ * SnapshotRepository取得
+ */
+export function getSnapshotRepository(): Result<ISnapshotRepository> {
+  ensureInitialized();
+  if (!_snapshotRepository) {
+    return err(new Error("スナップショットリポジトリが初期化されていません"));
+  }
+  return ok(_snapshotRepository);
 }
