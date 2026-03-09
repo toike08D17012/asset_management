@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { HoldingData } from "@/types/api";
+import type { HoldingData, SnapshotComparisonResponse, SnapshotHoldingComparison, SnapshotComparisonEntry } from "@/types/api";
 import { formatJPY, formatUSD, getMutualFundDivisor } from "@/lib/format";
 import { normalizeSecurityNameForDisplay } from "@/lib/security-name-display";
 
@@ -50,8 +50,27 @@ const BASE_COLUMNS: ColumnDef[] = [
 ];
 
 const SORT_STORAGE_KEY = "holdings-table-sort-v1";
+const DIFF_MODE_STORAGE_KEY = "holdings-table-diff-mode-v1";
 const DEFAULT_SORT_STATE: SortState = { columnId: "security", direction: "asc" };
 const REFRESHABLE_COLUMNS: readonly MarketColumnId[] = ["sector", "dividendYield", "currentPrice"];
+
+type DiffMode = "none" | "prevDay" | "prevMonth";
+
+function getComparisonEntry(
+  snapshotComparison: SnapshotComparisonResponse | null | undefined,
+  diffMode: DiffMode
+): SnapshotComparisonEntry | null {
+  if (!snapshotComparison || diffMode === "none") return null;
+  return diffMode === "prevDay" ? snapshotComparison.previousDay : snapshotComparison.previousMonth;
+}
+
+function findComparisonHolding(
+  entry: SnapshotComparisonEntry,
+  ticker: string,
+  securityType: string
+): SnapshotHoldingComparison | null {
+  return entry.holdings.find((h) => h.ticker === ticker && h.securityType === securityType) ?? null;
+}
 
 function isColumnId(value: unknown): value is ColumnId {
   return typeof value === "string" && BASE_COLUMNS.some((c) => c.id === value);
@@ -136,6 +155,7 @@ export function HoldingsTable({
   title,
   description,
   holdings,
+  snapshotComparison,
   onForceRefreshColumn,
   onForceRefreshAll,
   onForceRefreshUrls,
@@ -146,6 +166,7 @@ export function HoldingsTable({
   title?: string;
   description?: string;
   holdings: HoldingData[];
+  snapshotComparison?: SnapshotComparisonResponse | null;
   onForceRefreshColumn?: (columnId: MarketColumnId) => void;
   onForceRefreshAll?: () => void;
   onForceRefreshUrls?: () => void;
@@ -160,6 +181,7 @@ export function HoldingsTable({
   const [sortState, setSortState] = useState<SortState>(DEFAULT_SORT_STATE);
   const [isSortStateLoaded, setIsSortStateLoaded] = useState(false);
   const [sortMenuColumnId, setSortMenuColumnId] = useState<ColumnId | null>(null);
+  const [diffMode, setDiffMode] = useState<DiffMode>("none");
   const isMutualFundOnly = holdings.length > 0 && holdings.every((h) => h.security.type === "mutualFund");
   const columns = useMemo(() => getDisplayColumns(isMutualFundOnly), [isMutualFundOnly]);
 
@@ -173,6 +195,12 @@ export function HoldingsTable({
   useEffect(() => {
     setSortState(getStoredSortState());
     setIsSortStateLoaded(true);
+    try {
+      const saved = window.localStorage.getItem(DIFF_MODE_STORAGE_KEY);
+      if (saved === "none" || saved === "prevDay" || saved === "prevMonth") {
+        setDiffMode(saved);
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -183,6 +211,13 @@ export function HoldingsTable({
   const selectSort = (columnId: ColumnId, direction: SortDirection) => {
     setSortState({ columnId, direction });
     setSortMenuColumnId(null);
+  };
+
+  const changeDiffMode = (mode: DiffMode) => {
+    setDiffMode(mode);
+    try {
+      window.localStorage.setItem(DIFF_MODE_STORAGE_KEY, mode);
+    } catch {}
   };
 
   const data = useMemo(() => {
@@ -229,7 +264,37 @@ export function HoldingsTable({
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center bg-muted p-0.5 rounded-lg text-xs" title="表示モード切替">
+              {(["none", "prevDay", "prevMonth"] as const).map((mode) => {
+                const label = mode === "none" ? "通常" : mode === "prevDay" ? "前日比" : "前月比";
+                const hasData =
+                  mode === "none" ||
+                  (mode === "prevDay" && snapshotComparison?.previousDay != null) ||
+                  (mode === "prevMonth" && snapshotComparison?.previousMonth != null);
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => changeDiffMode(mode)}
+                    disabled={!hasData && mode !== "none"}
+                    title={
+                      !hasData && mode !== "none"
+                        ? "比較用スナップショットがありません"
+                        : undefined
+                    }
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                      diffMode === mode
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
             {onForceRefreshUrls && (
               <button
                 type="button"
@@ -294,6 +359,14 @@ export function HoldingsTable({
               {refreshStatusText}
             </p>
           )}
+          {diffMode !== "none" && (() => {
+            const entry = getComparisonEntry(snapshotComparison, diffMode);
+            return entry ? (
+              <p className="text-xs text-muted-foreground">
+                比較基準: {entry.date}
+              </p>
+            ) : null;
+          })()}
         </div>
       </div>
 
@@ -403,6 +476,34 @@ export function HoldingsTable({
               const currentDividendYield = typeof h.dividendYield === "number" ? h.dividendYield : null;
               const dividendAmountDisplay = typeof h.dividendYield === "number" ? fmt((qty * curPrice * h.dividendYield) / divisor) : "-";
 
+              // Diff mode: look up comparison holding
+              const comparisonEntry = getComparisonEntry(snapshotComparison, diffMode);
+              const prevHolding = comparisonEntry
+                ? findComparisonHolding(comparisonEntry, h.security.ticker, h.security.type)
+                : null;
+
+              const renderDiffValue = (
+                diff: number,
+                pct: number,
+                fmtFn: (n: number) => string
+              ) => {
+                const positive = diff >= 0;
+                const sign = positive ? "+" : "";
+                const colorClass = positive
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : "text-red-700 dark:text-red-400";
+                return (
+                  <div className="flex flex-col items-end">
+                    <span className={`text-sm font-medium ${colorClass}`}>
+                      {sign}{fmtFn(diff)}
+                    </span>
+                    <span className={`text-xs ${colorClass}`}>
+                      ({sign}{pct.toFixed(2)}%)
+                    </span>
+                  </div>
+                );
+              };
+
               const renderCell = (colId: ColumnId) => {
                 switch (colId) {
                   case "security":
@@ -434,14 +535,44 @@ export function HoldingsTable({
                     );
                   case "sector": return <span className="text-sm text-muted-foreground">{sector}</span>;
                   case "dividendYield": return <span className="text-sm text-muted-foreground">{currentDividendYield !== null ? `${(currentDividendYield * 100).toFixed(2)}%` : "-"}</span>;
-                  case "dividendYieldCost": 
+                  case "dividendYieldCost":
                      const yieldCost = (currentDividendYield !== null && avgPrice > 0) ? (curPrice * currentDividendYield) / avgPrice : null;
                      return <span className="text-sm text-muted-foreground">{yieldCost !== null ? `${(yieldCost * 100).toFixed(2)}%` : "-"}</span>;
                   case "quantity": return <span className="text-sm text-foreground">{qty.toLocaleString()} <span className="text-muted-foreground text-xs">{unit === "shares" ? "株" : "口"}</span></span>;
-                  case "currentPrice": return <span className="text-sm text-foreground">{fmt(curPrice)}</span>;
+                  case "currentPrice": {
+                    if (diffMode !== "none" && prevHolding) {
+                      const diff = curPrice - prevHolding.currentPrice;
+                      const pct = prevHolding.currentPrice > 0 ? (diff / prevHolding.currentPrice) * 100 : 0;
+                      return renderDiffValue(diff, pct, fmt);
+                    }
+                    if (diffMode !== "none" && !prevHolding) {
+                      return <span className="text-sm text-muted-foreground">-</span>;
+                    }
+                    return <span className="text-sm text-foreground">{fmt(curPrice)}</span>;
+                  }
                   case "averagePrice": return <span className="text-sm text-foreground">{fmt(avgPrice)}</span>;
-                  case "marketValue": return <span className="text-sm font-medium text-foreground">{fmt(currentValue)}</span>;
-                  case "gainLoss": return (
+                  case "marketValue": {
+                    if (diffMode !== "none" && prevHolding) {
+                      const diff = currentValue - prevHolding.marketValue;
+                      const pct = prevHolding.marketValue > 0 ? (diff / prevHolding.marketValue) * 100 : 0;
+                      return renderDiffValue(diff, pct, fmt);
+                    }
+                    if (diffMode !== "none" && !prevHolding) {
+                      return <span className="text-sm text-muted-foreground">-</span>;
+                    }
+                    return <span className="text-sm font-medium text-foreground">{fmt(currentValue)}</span>;
+                  }
+                  case "gainLoss": {
+                    if (diffMode !== "none" && prevHolding) {
+                      const diff = gainLoss - prevHolding.gainLoss;
+                      // % relative to previous market value (how much portfolio value changed)
+                      const pct = prevHolding.marketValue > 0 ? (diff / prevHolding.marketValue) * 100 : 0;
+                      return renderDiffValue(diff, pct, fmt);
+                    }
+                    if (diffMode !== "none" && !prevHolding) {
+                      return <span className="text-sm text-muted-foreground">-</span>;
+                    }
+                    return (
                       <div className="flex flex-col items-end">
                         <span className={`text-sm font-medium ${isPositive ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
                           {isPositive ? "+" : ""}{fmt(gainLoss)}
@@ -451,6 +582,7 @@ export function HoldingsTable({
                          </span>
                       </div>
                     );
+                  }
                   case "dividends": return <span className="text-sm text-foreground">{dividendAmountDisplay}</span>;
                   case "yahooLink": {
                     const symbol = encodeURIComponent(h.yahooSymbol ?? h.security.ticker);
