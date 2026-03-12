@@ -10,6 +10,12 @@ services:
       NODE_ENV: development
       DATABASE_URL: ./data/asset_management.db
       SESSION_SECRET: dev-session-secret-change-me
+      AUTO_SNAPSHOT_ENABLED: "true"
+      AUTO_SNAPSHOT_HOUR: "16"
+      AUTO_SNAPSHOT_MINUTE: "10"
+      AUTO_SNAPSHOT_TIMEZONE: Asia/Tokyo
+      AUTO_SNAPSHOT_POLL_MS: "60000"
+      AUTO_SNAPSHOT_EXCLUDE_JP_HOLIDAYS: "true"
     volumes:
       - ..:/app
       - /app/node_modules
