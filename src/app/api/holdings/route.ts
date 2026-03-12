@@ -5,89 +5,16 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getHoldingsService } from "@/lib/service-container";
+import { getSnapshotRepository } from "@/lib/service-container";
 import { withApiHandler, resultToResponse } from "@/lib/api-handler";
 import { requireAuth } from "@/lib/auth";
 import { Currency, QuantityUnit, SecurityType } from "@/domain/types";
 import { parseJsonObject, readEnumField, readStringField } from "@/lib/request-validation";
 import {
-  fetchYahooMarketDataBatch,
   fetchYahooMarketData,
-  getYahooMarketDataBatchFromCache,
-  marketDataInputKey,
-  normalizeYahooSymbol,
-  toGoogleFinanceSymbol,
-  type MarketDataInput,
 } from "@/infrastructure/scraping/yahoo-finance-scraper";
-
-type MarketDataResponseMode = "cache" | "live";
-
-async function enrichHoldingsWithMarketData<T extends {
-  security: { ticker: string; name?: string; currency: "JPY" | "USD"; type: "stock" | "mutualFund" };
-  currentPrice: { amount: number; currency: "JPY" | "USD" };
-}>(holdings: T[]): Promise<Array<T & {
-  sector?: string | null;
-  dividendYield?: number | null;
-  yahooSymbol?: string;
-  googleSymbol?: string;
-}>> {
-  return enrichHoldingsWithDataSource(holdings, "live", false, false);
-}
-
-async function enrichHoldingsWithDataSource<T extends {
-  security: { ticker: string; name?: string; currency: "JPY" | "USD"; type: "stock" | "mutualFund" };
-  currentPrice: { amount: number; currency: "JPY" | "USD" };
-}>(
-  holdings: T[],
-  mode: MarketDataResponseMode,
-  forceRefresh: boolean,
-  forceResolveSymbol: boolean,
-): Promise<Array<T & {
-  sector?: string | null;
-  dividendYield?: number | null;
-  yahooSymbol?: string;
-  googleSymbol?: string;
-}>> {
-  const inputs: MarketDataInput[] = holdings.map((holding) => ({
-    ticker: holding.security.ticker,
-    name: holding.security.name,
-    currency: holding.security.currency,
-    securityType: holding.security.type,
-  }));
-
-  const marketDataMap =
-    mode === "cache"
-      ? await getYahooMarketDataBatchFromCache(inputs, { allowStale: true, todayOnly: false })
-      : await fetchYahooMarketDataBatch(inputs, {
-          minIntervalMs: 250,
-          forceRefresh,
-          forceResolveSymbol,
-        });
-
-  const enriched = holdings.map((holding) => {
-    const input: MarketDataInput = {
-      ticker: holding.security.ticker,
-      name: holding.security.name,
-      currency: holding.security.currency,
-      securityType: holding.security.type,
-    };
-    const marketData = marketDataMap.get(marketDataInputKey(input)) ?? null;
-    const normalizedYahooSymbol = normalizeYahooSymbol(input);
-
-    return {
-      ...holding,
-      currentPrice:
-        typeof marketData?.currentPrice === "number" && Number.isFinite(marketData.currentPrice)
-          ? { ...holding.currentPrice, amount: marketData.currentPrice }
-          : holding.currentPrice,
-      sector: marketData?.sector ?? null,
-      dividendYield: marketData?.dividendYield ?? null,
-      yahooSymbol: marketData?.yahooSymbol ?? normalizedYahooSymbol ?? holding.security.ticker,
-      googleSymbol: marketData?.googleSymbol ?? toGoogleFinanceSymbol(input),
-    };
-  });
-
-  return enriched;
-}
+import { persistSnapshotForAggregatedHoldings, type SnapshotSourceHolding } from "./snapshot-persistence";
+import { enrichHoldingsWithDataSource, type MarketDataResponseMode } from "@/infrastructure/market-data/enrich-holdings";
 
 export const GET = requireAuth(async (request: NextRequest) => {
   return withApiHandler(async () => {
@@ -111,6 +38,23 @@ export const GET = requireAuth(async (request: NextRequest) => {
         forceRefresh,
         forceResolveSymbol,
       );
+
+      if (marketDataMode === "live") {
+        const snapshotRepoResult = getSnapshotRepository();
+        if (!snapshotRepoResult.ok) {
+          console.error("Failed to get snapshot repository:", snapshotRepoResult.error.message);
+        } else {
+          const persistResult = await persistSnapshotForAggregatedHoldings(
+            snapshotRepoResult.value,
+            holdings as SnapshotSourceHolding[]
+          );
+
+          if (!persistResult.ok) {
+            console.error("Failed to persist holdings snapshot:", persistResult.error.message);
+          }
+        }
+      }
+
       return NextResponse.json({ holdings, aggregated: true });
     }
 
