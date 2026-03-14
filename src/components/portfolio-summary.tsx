@@ -66,6 +66,7 @@ export function PortfolioSummary({
       title: "総資産評価額 (JPY)",
       value: formatJPY(portfolio.totalValueJPY),
       subtext: portfolio.totalCostJPY > 0 ? `取得額: ${formatJPY(portfolio.totalCostJPY)}` : undefined,
+      subtextClassName: undefined,
       trend: portfolio.gainLossJPY,
       trendPercent: portfolio.totalCostJPY ? (portfolio.gainLossJPY / portfolio.totalCostJPY) * 100 : 0,
       currency: "¥",
@@ -75,6 +76,7 @@ export function PortfolioSummary({
       title: "総資産評価額 (USD)",
       value: formatUSD(portfolio.totalValueUSD),
       subtext: portfolio.totalCostUSD > 0 ? `取得額: ${formatUSD(portfolio.totalCostUSD)}` : undefined,
+      subtextClassName: undefined,
       trend: portfolio.gainLossUSD,
       trendPercent: portfolio.totalCostUSD ? (portfolio.gainLossUSD / portfolio.totalCostUSD) * 100 : 0,
       currency: "$",
@@ -84,18 +86,21 @@ export function PortfolioSummary({
       title: "保有銘柄数",
       value: portfolio.holdingsCount,
       subtext: "銘柄",
+      subtextClassName: undefined,
       simple: true,
     },
     {
       title: "連携口座数",
       value: portfolio.accountsCount,
       subtext: "口座",
+      subtextClassName: undefined,
       simple: true,
     },
     {
       title: "年間配当総額（予想）",
       value: annualDividendDisplay,
       subtext: `現在値ベース利回り: ${annualDividendYieldDisplay}`,
+      subtextClassName: "whitespace-nowrap text-[clamp(0.55rem,0.85vw,0.75rem)] tracking-tight",
       simple: false,
     },
   ];
@@ -120,7 +125,7 @@ export function PortfolioSummary({
                   </span>
                 </div>
               )}
-               <p className="text-xs text-muted-foreground mt-1">{card.subtext}</p>
+               <p className={`text-xs text-muted-foreground mt-1 ${card.subtextClassName ?? ""}`.trim()}>{card.subtext}</p>
             </div>
           )}
         </div>
