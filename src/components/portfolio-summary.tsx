@@ -45,6 +45,21 @@ export function PortfolioSummary({
   }
 
   const annualDividendDisplay = annualDividendDisplayParts.join(" / ") || "-";
+  const annualDividendYieldDisplayParts: string[] = [];
+
+  if (portfolio.totalValueJPY > 0) {
+    annualDividendYieldDisplayParts.push(
+      `${((annualDividendJPY / portfolio.totalValueJPY) * 100).toFixed(2)}% (JPY)`
+    );
+  }
+
+  if (portfolio.totalValueUSD > 0) {
+    annualDividendYieldDisplayParts.push(
+      `${((annualDividendUSD / portfolio.totalValueUSD) * 100).toFixed(2)}% (USD)`
+    );
+  }
+
+  const annualDividendYieldDisplay = annualDividendYieldDisplayParts.join(" / ") || "-";
 
   const cards = [
     {
@@ -80,7 +95,7 @@ export function PortfolioSummary({
     {
       title: "年間配当総額（予想）",
       value: annualDividendDisplay,
-      subtext: "配当利回り × 現在値ベース",
+      subtext: `現在値ベース利回り: ${annualDividendYieldDisplay}`,
       simple: false,
     },
   ];
