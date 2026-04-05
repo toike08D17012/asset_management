@@ -21,8 +21,9 @@ type SBISectionType = "stock" | "mutualFund" | "unknown";
 
 // セクション検出用のパターン
 // 新形式: 株式（特定預り）/ 旧形式: 株式（現物/特定預り）のどちらにも対応
-const STOCK_SECTION_PATTERN = /株式（|株式\(/;
-const MUTUAL_FUND_SECTION_PATTERN = /投資信託（|投資信託\(/;
+// ※ ^で行頭アンカー: ファンド名内の「株式（」に誤マッチしないようにする
+const STOCK_SECTION_PATTERN = /^株式（|^株式\(/;
+const MUTUAL_FUND_SECTION_PATTERN = /^投資信託（|^投資信託\(/;
 const SECTION_TOTAL_PATTERN = /合計/;
 // 新形式: 銘柄コード（括弧なし）/ 旧形式: 銘柄（コード）のどちらにも対応
 const HEADER_PATTERN_STOCK = /銘柄（コード）|銘柄\(コード\)|銘柄コード/;
