@@ -277,9 +277,9 @@ export function HoldingsTable({
                     key={mode}
                     type="button"
                     onClick={() => changeDiffMode(mode)}
-                    disabled={!hasData && mode !== "none"}
+                    disabled={!hasData}
                     title={
-                      !hasData && mode !== "none"
+                      !hasData
                         ? "比較用スナップショットがありません"
                         : undefined
                     }

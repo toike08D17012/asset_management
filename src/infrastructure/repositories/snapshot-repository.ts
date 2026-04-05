@@ -15,7 +15,17 @@ import {
 } from "@/domain/types";
 import type { ISnapshotRepository } from "@/domain/repositories";
 import { toErrorMessage } from "@/lib/errors";
-import { desc, gte, lte, and } from "drizzle-orm";
+import { desc, gte, lte, and, eq } from "drizzle-orm";
+
+function getLocalDayRange(date: Date): { start: Date; end: Date } {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
+
+  return { start, end };
+}
 
 function rowToSnapshot(row: typeof snapshots.$inferSelect): Snapshot {
   return {
@@ -31,12 +41,46 @@ export class SnapshotRepository implements ISnapshotRepository {
   async save(snapshot: Snapshot): Promise<Result<Snapshot>> {
     try {
       const db = getDb();
-      await db.insert(snapshots).values({
-        id: snapshot.id,
+      const { start, end } = getLocalDayRange(snapshot.timestamp);
+      const existingRows = await db
+        .select()
+        .from(snapshots)
+        .where(
+          and(
+            gte(snapshots.timestamp, start.toISOString()),
+            lte(snapshots.timestamp, end.toISOString())
+          )
+        )
+        .orderBy(desc(snapshots.timestamp));
+
+      const payload = {
         timestamp: snapshot.timestamp.toISOString(),
         totalValueJPY: snapshot.totalValueJPY,
         totalValueUSD: snapshot.totalValueUSD,
         holdingsData: JSON.stringify(snapshot.holdings),
+      };
+
+      if (existingRows.length > 0) {
+        const [latestRow, ...duplicateRows] = existingRows;
+
+        await db
+          .update(snapshots)
+          .set(payload)
+          .where(eq(snapshots.id, latestRow.id));
+
+        for (const duplicateRow of duplicateRows) {
+          await db.delete(snapshots).where(eq(snapshots.id, duplicateRow.id));
+        }
+
+        return ok({
+          ...snapshot,
+          id: createSnapshotId(latestRow.id),
+        });
+      }
+
+      await db.insert(snapshots).values({
+        id: snapshot.id,
+        ...payload,
       });
       return ok(snapshot);
     } catch (error) {
