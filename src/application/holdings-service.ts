@@ -133,15 +133,20 @@ export class HoldingsService {
         ? params.averagePurchasePrice
         : params.currentPrice;
 
-    // 同一アカウント内に同一銘柄が存在するか確認
+    // 同一アカウント内の同一銘柄（ticker/currency/securityType）をすべて削除してから新規挿入
+    // （重複行の蓄積を防ぎ、株数を加算ではなく置換する）
     const existingResult = await this.holdingRepo.findByAccountId(accountResult.value.id);
     if (!existingResult.ok) return existingResult;
-    const existingHolding = existingResult.value.find(
+    const duplicates = existingResult.value.filter(
       (h) =>
         h.security.ticker === params.ticker &&
         h.security.currency === params.currency &&
         h.security.type === params.securityType,
     );
+    for (const h of duplicates) {
+      const deleteResult = await this.holdingRepo.delete(h.id);
+      if (!deleteResult.ok) return deleteResult;
+    }
 
     const holdingResult = createHolding({
       accountId: accountResult.value.id,
@@ -166,12 +171,7 @@ export class HoldingsService {
     });
     if (!holdingResult.ok) return holdingResult;
 
-    // 既存銘柄がある場合はIDを引き継ぎ、株数を上書き（追加ではなく置換）
-    const holdingToSave = existingHolding
-      ? { ...holdingResult.value, id: existingHolding.id }
-      : holdingResult.value;
-
-    return this.holdingRepo.save(holdingToSave);
+    return this.holdingRepo.save(holdingResult.value);
   }
 
   /**
