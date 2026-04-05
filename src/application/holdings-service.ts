@@ -133,6 +133,16 @@ export class HoldingsService {
         ? params.averagePurchasePrice
         : params.currentPrice;
 
+    // 同一アカウント内に同一銘柄が存在するか確認
+    const existingResult = await this.holdingRepo.findByAccountId(accountResult.value.id);
+    if (!existingResult.ok) return existingResult;
+    const existingHolding = existingResult.value.find(
+      (h) =>
+        h.security.ticker === params.ticker &&
+        h.security.currency === params.currency &&
+        h.security.type === params.securityType,
+    );
+
     const holdingResult = createHolding({
       accountId: accountResult.value.id,
       security: {
@@ -156,7 +166,12 @@ export class HoldingsService {
     });
     if (!holdingResult.ok) return holdingResult;
 
-    return this.holdingRepo.save(holdingResult.value);
+    // 既存銘柄がある場合はIDを引き継ぎ、株数を上書き（追加ではなく置換）
+    const holdingToSave = existingHolding
+      ? { ...holdingResult.value, id: existingHolding.id }
+      : holdingResult.value;
+
+    return this.holdingRepo.save(holdingToSave);
   }
 
   /**
