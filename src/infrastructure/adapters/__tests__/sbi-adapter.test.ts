@@ -42,6 +42,44 @@ const SAMPLE_SBI_CSV = `"ポートフォリオ一覧",
 "評価額","含み損益","含み損益（％）","前日比","前日比（％）",
 2241344.34,+550515.3,+32.56,-28421.01,-1.25`;
 
+// 新フォーマット（2024年以降）のテストデータ
+// セクション名: 株式（特定預り）, ヘッダー: 銘柄コード,銘柄名称,...（別列）
+const SAMPLE_SBI_CSV_NEW_FORMAT = `保有証券一覧
+
+株式（特定預り）合計
+
+評価額合計,評価損益合計
+372315,+126980
+
+株式（特定預り）
+
+銘柄コード,銘柄名称,保有株数,売却注文中,取得単価,現在値,取得金額,評価額,評価損益
+"2914","ＪＴ",30,,2766,6105,82980,183150,+100170 
+"4502","武田薬",20,,4199,5802,83980,116040,+32060 
+"5401","日本製鉄",125,,627,585,78375,73125,-5250 
+
+投資信託（金額/NISA預り（成長投資枠））合計
+
+評価額合計,評価損益合計
+829738,+159250
+
+投資信託（金額/NISA預り（成長投資枠））
+
+ファンド名,保有口数,売却注文中,取得単価,基準価額,取得金額,評価額,評価損益,分配金受取方法
+"ＳＢＩ日本高配当株式（分配）ファンド（年４回決算型）",247395口,,12477,16104,308674,398404,+89730,受取
+"ＳＢＩ・Ｖ・米国高配当株式インデックス・ファンド（年４回決算型）",243889口,,12147,14122,296251,344420,+48169,受取
+"ＳＢＩ欧州高配当株式（分配）ファンド（年４回決算型）",65153口,,10063,13340,65563,86914,+21351,受取
+
+投資信託（金額/NISA預り（つみたて投資枠））合計
+
+評価額合計,評価損益合計
+1103709,+223695
+
+投資信託（金額/NISA預り（つみたて投資枠））
+
+ファンド名,保有口数,売却注文中,取得単価,基準価額,取得金額,評価額,評価損益,分配金受取方法
+"ｅＭＡＸＩＳ　Ｓｌｉｍ　全世界株式（オール・カントリー）",331793口,,26523,33265,880014,1103709,+223695,再投資`;
+
 describe("SBIBrokerageAdapter", () => {
   it("実際のSBI証券CSVから全銘柄を正しくパースできる", () => {
     const result = sbiAdapter.parseCSV(SAMPLE_SBI_CSV);
@@ -161,5 +199,77 @@ describe("SBIBrokerageAdapter", () => {
   it("getCSVFormatDescription が説明を返す", () => {
     const desc = sbiAdapter.getCSVFormatDescription();
     expect(desc).toContain("SBI証券");
+  });
+});
+
+describe("SBIBrokerageAdapter（新フォーマット 2024年以降）", () => {
+  it("新フォーマットCSVから全銘柄を正しくパースできる", () => {
+    const result = sbiAdapter.parseCSV(SAMPLE_SBI_CSV_NEW_FORMAT);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // 株式3 + 投資信託4 = 7件
+    expect(result.value).toHaveLength(7);
+  });
+
+  it("新フォーマットの株式セクションを正しくパースできる", () => {
+    const result = sbiAdapter.parseCSV(SAMPLE_SBI_CSV_NEW_FORMAT);
+    if (!result.ok) return;
+
+    const stocks = result.value.filter(
+      (h) => h.securityType === SecurityType.STOCK
+    );
+    expect(stocks).toHaveLength(3);
+
+    // 武田薬
+    const takeda = stocks.find((s) => s.ticker === "4502");
+    expect(takeda).toBeDefined();
+    expect(takeda!.name).toBe("武田薬");
+    expect(takeda!.quantity).toBe(20);
+    expect(takeda!.averagePurchasePrice).toBe(4199);
+    expect(takeda!.currentPrice).toBe(5802);
+    expect(takeda!.currency).toBe(Currency.JPY);
+    expect(takeda!.quantityUnit).toBe(QuantityUnit.SHARES);
+
+    // 日本製鉄
+    const nipponSteel = stocks.find((s) => s.ticker === "5401");
+    expect(nipponSteel).toBeDefined();
+    expect(nipponSteel!.quantity).toBe(125);
+    expect(nipponSteel!.averagePurchasePrice).toBe(627);
+    expect(nipponSteel!.currentPrice).toBe(585);
+
+    // JT
+    const jt = stocks.find((s) => s.ticker === "2914");
+    expect(jt).toBeDefined();
+    expect(jt!.name).toBe("ＪＴ");
+    expect(jt!.quantity).toBe(30);
+    expect(jt!.averagePurchasePrice).toBe(2766);
+    expect(jt!.currentPrice).toBe(6105);
+  });
+
+  it("新フォーマットの投資信託セクションを正しくパースできる（口サフィックス除去）", () => {
+    const result = sbiAdapter.parseCSV(SAMPLE_SBI_CSV_NEW_FORMAT);
+    if (!result.ok) return;
+
+    const funds = result.value.filter(
+      (h) => h.securityType === SecurityType.MUTUAL_FUND
+    );
+    expect(funds).toHaveLength(4);
+
+    // SBI日本高配当
+    const jpnDiv = funds.find((f) => f.ticker === "SBI-JPN-DIV");
+    expect(jpnDiv).toBeDefined();
+    expect(jpnDiv!.quantity).toBe(247395);
+    expect(jpnDiv!.averagePurchasePrice).toBe(12477);
+    expect(jpnDiv!.currentPrice).toBe(16104);
+    expect(jpnDiv!.quantityUnit).toBe(QuantityUnit.UNITS);
+
+    // eMAXIS Slim 全世界株式
+    const allCountry = funds.find((f) => f.ticker === "EMAXIS-ALL-COUNTRY");
+    expect(allCountry).toBeDefined();
+    expect(allCountry!.quantity).toBe(331793);
+    expect(allCountry!.averagePurchasePrice).toBe(26523);
+    expect(allCountry!.currentPrice).toBe(33265);
   });
 });
