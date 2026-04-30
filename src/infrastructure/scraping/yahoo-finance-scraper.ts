@@ -1083,6 +1083,28 @@ export function parseYahooJapanHtml(html: string): {
 }
 
 function extractSectorFromHtml(html: string, plainText: string): string | null {
+  // 新版Yahoo!ファイナンスの業種リンク（例: class="...industryName...">輸送用機器</a>）
+  const industryLinkMatch = html.match(
+    /class=["'][^"']*industryName[^"']*["'][^>]*>([^<]{1,80})<\/a>/iu
+  );
+  if (industryLinkMatch?.[1]) {
+    const sectorFromIndustryLink = decodeHtmlEntities(industryLinkMatch[1]).trim();
+    if (sectorFromIndustryLink.length > 0) {
+      return sectorFromIndustryLink;
+    }
+  }
+
+  // プロフィールページの業種分類テーブル（例: <th>業種分類</th><td>...<a>輸送用機器</a>）
+  const profileIndustryMatch = html.match(
+    /業種(?:分類)?<\/th>[\s\S]{0,300}?<a\b[^>]*>([^<]{1,80})<\/a>/iu
+  );
+  if (profileIndustryMatch?.[1]) {
+    const sectorFromProfileTable = decodeHtmlEntities(profileIndustryMatch[1]).trim();
+    if (sectorFromProfileTable.length > 0) {
+      return sectorFromProfileTable;
+    }
+  }
+
   const jsonMatch = html.match(
     /"(?:categoryName|assetTypeName|fundTypeName|industryName)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/
   );

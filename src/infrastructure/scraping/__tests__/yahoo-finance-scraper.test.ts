@@ -138,6 +138,40 @@ describe("yahoo-finance-scraper", () => {
     expect(parsed?.dividendYield).toBeCloseTo(0.0252, 6);
   });
 
+  it("新版Yahoo!ファイナンスHTMLのindustryNameリンクから業種を抽出できる", () => {
+    const html = `
+      <html><body>
+        <div class="_CommonPriceBoard__mainHeader_1g7gt_6 target_modules">
+          <span class="_CommonPriceBoard__code_1g7gt_11">7203</span>
+          <a href="/search/qi/?ids=3700" class="_CommonPriceBoard__industryName_1g7gt_14">輸送用機器</a>
+        </div>
+      </body></html>
+    `;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.sector).toBe("輸送用機器");
+  });
+
+  it("プロフィール業種分類テーブルから業種を抽出できる", () => {
+    const html = `
+      <html><body>
+        <table>
+          <tr>
+            <th>業種分類</th>
+            <td><a href="https://finance.yahoo.co.jp/search/qi?ids=3700">輸送用機器</a></td>
+          </tr>
+        </table>
+      </body></html>
+    `;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.sector).toBe("輸送用機器");
+  });
+
   it("1%未満の配当利回りもパーセントとして正規化できる", () => {
     const html = `
       <html><head></head><body>
