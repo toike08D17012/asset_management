@@ -172,6 +172,26 @@ describe("yahoo-finance-scraper", () => {
     expect(parsed?.sector).toBe("輸送用機器");
   });
 
+  it("新版Yahoo!ファイナンスRSCペイロードから配当利回りを抽出できる", () => {
+    // self.__next_f.push 内の JSON エスケープ形式 (\"key\":{...\"value\":\"3.14\"...})
+    const html = String.raw`<html><body><script>self.__next_f.push([1,"30:[{\"indicators\":{\"shareDividendYield\":{\"name\":\"配当利回り\",\"value\":\"3.14\",\"suffix\":\"%\"}}}]"])</script></body></html>`;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.dividendYield).toBeCloseTo(0.0314, 6);
+  });
+
+  it("新版Yahoo!ファイナンスRSCペイロードのpreviousPriceから株価を抽出できる", () => {
+    const html = String.raw`<html><body><script>self.__next_f.push([1,"30:[{\"indicators\":{\"previousPrice\":{\"name\":\"前日終値\",\"value\":\"3,112\"},\"shareDividendYield\":{\"name\":\"配当利回り\",\"value\":\"3.14\",\"suffix\":\"%\"}}}]"])</script></body></html>`;
+
+    const parsed = parseYahooJapanHtml(html);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.currentPrice).toBe(3112);
+    expect(parsed?.dividendYield).toBeCloseTo(0.0314, 6);
+  });
+
   it("1%未満の配当利回りもパーセントとして正規化できる", () => {
     const html = `
       <html><head></head><body>

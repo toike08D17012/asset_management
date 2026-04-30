@@ -1044,9 +1044,15 @@ export function parseYahooJapanHtml(html: string): {
     sectorMatch?.[1] ? decodeJsonString(sectorMatch[1]).trim() || null : null;
   const sector = sectorFromFallback ?? supplementalSector;
 
-  const dividendMatch = html.match(
+  // 旧形式
+  const dividendMatchOld = html.match(
     /"(?:shareDividendYield|distributionYield|distributionRate|annualDistributionYield|yieldRate|dividendYield)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/
   );
+  // 新形式(RSC): \"shareDividendYield\":{...\"value\":\"3.14\"...}
+  const dividendMatchRsc = html.match(
+    /\\"(?:shareDividendYield|distributionYield|distributionRate|annualDistributionYield|yieldRate|dividendYield)\\":\{[^}]{0,300}\\"value\\":\\"([^\\"]+)\\"/
+  );
+  const dividendMatch = dividendMatchOld ?? dividendMatchRsc;
   const dividendRaw = dividendMatch?.[1] ?? dividendMatch?.[2] ?? null;
   const dividendPercent = toFiniteNumber(dividendRaw);
   const dividendYieldFromFallback =
@@ -1121,7 +1127,10 @@ function extractSectorFromHtml(html: string, plainText: string): string | null {
 
 function extractDividendYieldFromHtml(html: string, plainText: string): number | null {
   const fromJson = extractNumberByPatterns(html, [
+    // 旧形式: "shareDividendYield": 3.14 または "shareDividendYield": "3.14"
     /"(?:shareDividendYield|distributionYield|distributionRate|annualDistributionYield|yieldRate|dividendYield)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([0-9]+(?:\.[0-9]+)?))/,
+    // 新形式(RSC): \"shareDividendYield\":{...\"value\":\"3.14\"...}
+    /\\"(?:shareDividendYield|distributionYield|distributionRate|annualDistributionYield|yieldRate|dividendYield)\\":\{[^}]{0,300}\\"value\\":\\"([^\\"]+)\\"/,
   ]);
   if (fromJson !== null && fromJson >= 0) {
     return normalizeDividendPercent(fromJson);
@@ -1186,8 +1195,13 @@ function deriveDistributionYieldFromRecentDistribution(
 
 function extractCurrentPriceFromHtml(html: string, plainText: string): number | null {
   const fromJson = extractNumberByPatterns(html, [
+    // 旧形式
     /"(?:standardPrice|basePrice|priceValue|regularMarketPrice|currentPrice)"\s*:\s*(?:"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?(?:\s*(?:円|JPY))?)"|([0-9]+(?:\.[0-9]+)?))/,
     /"price"\s*:\s*\{\s*"raw"\s*:\s*([0-9]+(?:\.[0-9]+)?)/,
+    // 新形式(RSC): \"previousPrice\":{...\"value\":\"3,112\"...}
+    /\\"previousPrice\\":\{[^}]{0,300}\\"value\\":\\"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?)\\"/,
+    // 新形式(RSC) fallback: openPrice
+    /\\"openPrice\\":\{[^}]{0,300}\\"value\\":\\"([0-9０-９,，]+(?:[\.．][0-9０-９]+)?)\\"/,
   ]);
   if (fromJson !== null) {
     return fromJson;
